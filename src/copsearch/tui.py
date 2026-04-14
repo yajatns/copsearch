@@ -78,7 +78,8 @@ class TUI:
             if self.mode == "input":
                 self._handle_input(key)
             elif self.mode == "detail":
-                self._handle_detail(key)
+                if self._handle_detail(key):
+                    break
             else:
                 if self._handle_list(key):
                     break
@@ -179,7 +180,7 @@ class TUI:
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
         lines.append(("", 0))
         lines.append(
-            ("  Press Esc/q to go back, r to resume, y to copy resume cmd", curses.A_DIM)
+            ("  Press Esc/q to go back, Enter/r to resume, y to copy resume cmd", curses.A_DIM)
         )
 
         visible = h - 1
@@ -193,7 +194,7 @@ class TUI:
         if len(lines) > visible:
             pct = int((self.detail_scroll / max(1, len(lines) - visible)) * 100)
             self._addstr(
-                h - 1, 0, f" [{pct}%] j/k scroll  Esc: back  r: resume  y: copy", curses.A_DIM
+                h - 1, 0, f" [{pct}%] j/k scroll  Esc: back  Enter: resume  y: copy", curses.A_DIM
             )
 
     def _draw_input_bar(self, h: int, w: int) -> None:
@@ -256,17 +257,20 @@ class TUI:
             self.message = ""
         return False
 
-    def _handle_detail(self, key: int) -> None:
+    def _handle_detail(self, key: int) -> bool:
+        """Handle keypress in detail mode. Returns True to quit (resume)."""
         if key in (27, ord("q"), curses.KEY_LEFT):
             self.mode = "list"
         elif key in (curses.KEY_DOWN, ord("j")):
             self.detail_scroll += 1
         elif key in (curses.KEY_UP, ord("k")):
             self.detail_scroll = max(0, self.detail_scroll - 1)
-        elif key == ord("r"):
+        elif key in (curses.KEY_ENTER, 10, 13, ord("r")):
             self._resume_session()
+            return True
         elif key == ord("y"):
             self._copy_resume_cmd()
+        return False
 
     def _handle_input(self, key: int) -> None:
         if key == 27:  # Esc
