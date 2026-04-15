@@ -176,7 +176,7 @@ class TUI:
             lines.append(("  (no plan.md)", curses.A_DIM))
 
         lines.append(("", 0))
-        resume_cmd = f"  Resume: copilot -r {s.id}"
+        resume_cmd = f"  Resume: copilot --resume {s.id}"
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
         lines.append(("", 0))
         lines.append(
@@ -339,17 +339,17 @@ class TUI:
             return
         s = self.sessions[self.cursor]
         curses.endwin()
-        cmd = f"copilot -r {s.id}"
+        cmd = f"copilot --resume {s.id}"
         print(f"\n\033[1;32m▶ Resuming session in: {s.cwd}\033[0m")
         print(f"  {cmd}\n")
         os.chdir(s.cwd)
-        os.execlp("copilot", "copilot", "-r", s.id)
+        os.execlp("copilot", "copilot", "--resume", s.id)
 
     def _copy_resume_cmd(self) -> None:
         if not self.sessions:
             return
         s = self.sessions[self.cursor]
-        cmd = f"cd {s.cwd} && copilot -r {s.id}"
+        cmd = f"cd {s.cwd} && copilot --resume {s.id}"
         try:
             subprocess.run(["pbcopy"], input=cmd.encode(), check=True)
             self.message = "Copied resume command to clipboard"

@@ -85,7 +85,7 @@ def main() -> None:
             print(f"No session matching ID prefix: {args.id}")
             sys.exit(1)
         s = matches[0]
-        print(f"cd {s.cwd} && copilot -r {s.id}")
+        print(f"cd {s.cwd} && copilot --resume {s.id}")
         sys.exit(0)
 
     filtered = filter_sessions(sessions, args.project, args.branch, args.since, args.query)
