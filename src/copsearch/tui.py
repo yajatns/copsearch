@@ -111,7 +111,9 @@ class TUI:
         self._addstr(0, 0, title_line[:w].ljust(w), curses.color_pair(2) | curses.A_BOLD)
 
         # Column header
-        col_hdr = self._format_row("", "Age", "Project", "Branch", "Summary", w)
+        col_hdr = self._format_row(
+            "", "Age", "Msgs", "Project", "Branch", "Summary", w,
+        )
         self._addstr(1, 0, col_hdr, curses.A_BOLD | curses.A_UNDERLINE)
 
         # Session rows
@@ -133,6 +135,7 @@ class TUI:
             line = self._format_row(
                 prefix,
                 s.age_str,
+                s.depth_str,
                 s.project[:18],
                 (s.branch or "—")[:24],
                 s.display_summary,
@@ -174,6 +177,8 @@ class TUI:
             ("Created", s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "?"),
             ("Updated", s.updated_at.strftime("%Y-%m-%d %H:%M") if s.updated_at else "?"),
             ("Age", s.age_str),
+            ("User messages", str(s.user_messages) if s.user_messages else "—"),
+            ("Agent turns", str(s.assistant_turns) if s.assistant_turns else "—"),
             ("Summaries", str(s.summary_count)),
         ]
         for label, val in fields:
@@ -398,17 +403,18 @@ class TUI:
             self.message = f"Resume: {cmd}"
 
     def _format_row(
-        self, prefix: str, age: str, project: str,
+        self, prefix: str, age: str, msgs: str, project: str,
         branch: str, summary: str, w: int,
     ) -> str:
         w_pre = 3
         w_age = 5
+        w_msgs = 5
         w_proj = 20
         w_branch = 26
-        w_summ = max(w - w_pre - w_age - w_proj - w_branch - 3, 10)
+        w_summ = max(w - w_pre - w_age - w_msgs - w_proj - w_branch - 3, 10)
         return (
-            f"{prefix:<{w_pre}}{age:<{w_age}}{project:<{w_proj}}"
-            f"{branch:<{w_branch}}{summary[:w_summ]}"
+            f"{prefix:<{w_pre}}{age:<{w_age}}{msgs:>{w_msgs}} "
+            f"{project:<{w_proj}}{branch:<{w_branch}}{summary[:w_summ]}"
         )
 
     def _addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:

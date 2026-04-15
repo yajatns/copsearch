@@ -166,3 +166,36 @@ def test_session_without_lock_is_inactive(tmp_path: Path):
     s = sessions[0]
     assert s.is_active is False
     assert s.active_pid is None
+
+
+def test_user_message_count(tmp_path: Path):
+    """Session counts user messages and assistant turns from events.jsonl."""
+    d = _make_session_dir(tmp_path, "msgs-001", summary="Chat session")
+    events = (
+        '{"type":"user.message","data":{}}\n'
+        '{"type":"assistant.turn_start","data":{}}\n'
+        '{"type":"tool.execution_start","data":{"toolName":"bash"}}\n'
+        '{"type":"tool.execution_complete","data":{"toolName":"bash"}}\n'
+        '{"type":"user.message","data":{}}\n'
+        '{"type":"assistant.turn_start","data":{}}\n'
+        '{"type":"user.message","data":{}}\n'
+        '{"type":"assistant.turn_start","data":{}}\n'
+    )
+    (d / "events.jsonl").write_text(events)
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.user_messages == 3
+    assert s.assistant_turns == 3
+    assert s.depth_str == "3"
+
+
+def test_user_message_count_no_events(tmp_path: Path):
+    """Session without events.jsonl has zero counts."""
+    _make_session_dir(tmp_path, "noevent-001", summary="No events")
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.user_messages == 0
+    assert s.assistant_turns == 0
+    assert s.depth_str == "—"
