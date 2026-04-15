@@ -44,6 +44,8 @@ $ copsearch -q "database migration"
 |---------|-------------|
 | **Interactive TUI** | Curses-based browser with arrow-key navigation, vim keybindings |
 | **Active sessions** | `●` indicator shows which sessions are running in other terminals |
+| **Message count** | `Msgs` column shows user messages per session — spot heavy sessions at a glance |
+| **Delete sessions** | Press `d` in detail view to delete dead sessions (with confirmation) |
 | **Active filter** | `-a` / press `a` in TUI — show only live sessions |
 | **Project filter** | `-p webapp` — substring match on project name, repo, or path |
 | **Branch filter** | `-b 'feat/*'` — glob pattern matching on branch names |
@@ -75,22 +77,22 @@ copsearch
 
 ```
 ┌─ copsearch — Copilot Session Browser ──── [3 live] ──────────────┐
-│    Age   Project            Branch                Summary        │
+│    Age  Msgs  Project            Branch                Summary   │
 │ ────────────────────────────────────────────────────────────────  │
-│ ●  1h    openclaw           feat/parser-v2        Rewrite PDF... │
-│ ●  3h    openclaw           fix/ocr-confidence    OCR scoring... │
-│ ●  5h    dotfiles           main                  Neovim LSP...  │
-│ *  1d    webapp             feat/postgres-16      Migrate to...  │
-│    1d    api-server         fix/migration-rollback Fix rollba... │
-│    3d    ml-pipeline        main                  Add data va... │
-│    5d    blog               feat/dark-mode        CSS dark mo... │
+│ ●  1h     42  openclaw           feat/parser-v2        Rewrite.. │
+│ ●  3h     18  openclaw           fix/ocr-confidence    OCR sco.. │
+│ ●  5h      7  dotfiles           main                  Neovim ..  │
+│ *  1d    156  webapp             feat/postgres-16      Migrate..  │
+│    1d     33  api-server         fix/migration-rollback Fix ro.. │
+│    3d      —  ml-pipeline        main                  Add dat.. │
+│    5d      3  blog               feat/dark-mode        CSS dar.. │
 │                                                                  │
 │ 42/42 sessions                                                   │
 │ ↑↓/jk: navigate  /: search  a: active  Enter: details  q: quit  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**Legend:** `●` = session is running in another terminal, `*` = session has a plan.md
+**Legend:** `●` = active session, `*` = has plan.md, `Msgs` = user message count (`—` = no event data)
 
 #### TUI Keybindings
 
@@ -110,6 +112,7 @@ copsearch
 | `Enter` (in detail) | Resume session (launches Copilot in correct dir) |
 | `r` | Resume session |
 | `y` | Copy resume command to clipboard |
+| `d` (in detail) | Delete session (with confirmation; blocked for active sessions) |
 | `q` | Quit |
 
 ### CLI Mode
@@ -153,6 +156,7 @@ copsearch --list
 │   ├── workspace.yaml      # id, cwd, branch, repo, summary, dates
 │   ├── plan.md             # task plan (if created during session)
 │   ├── inuse.<PID>.lock    # present while session is running ← active detection!
+│   ├── events.jsonl       # event log (user messages, tool calls, turns)
 │   ├── checkpoints/
 │   │   └── index.md        # checkpoint history
 │   └── files/              # session artifacts
