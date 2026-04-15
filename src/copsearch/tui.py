@@ -240,6 +240,11 @@ class TUI:
         """Handle y/n confirmation for session deletion."""
         if key == ord("y"):
             s = self.sessions[self.cursor]
+            s.refresh_active()
+            if s.is_active:
+                self.message = "Session became active — delete cancelled"
+                self.mode = "detail"
+                return
             if s.delete():
                 self.all_sessions.remove(s)
                 self.sessions.remove(s)
@@ -333,6 +338,7 @@ class TUI:
             self._copy_resume_cmd()
         elif key in (ord("D"), ord("d")):
             s = self.sessions[self.cursor]
+            s.refresh_active()
             if s.is_active:
                 self.message = "Cannot delete an active session"
             else:

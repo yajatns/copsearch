@@ -135,8 +135,6 @@ def test_skips_bad_yaml(tmp_path: Path):
 
 def test_active_session_with_live_pid(tmp_path: Path):
     """Session with inuse lock matching a running PID is marked active."""
-    import os
-
     d = _make_session_dir(tmp_path, "active-001", summary="Active session")
     # Use our own PID — guaranteed to be alive
     (d / f"inuse.{os.getpid()}.lock").write_text("")

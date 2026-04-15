@@ -172,8 +172,26 @@ class Session:
         try:
             shutil.rmtree(self.session_dir)
             return True
-        except Exception:
+        except FileNotFoundError:
+            return True
+        except OSError:
             return False
+
+    def refresh_active(self) -> None:
+        """Re-check active status from on-disk lock files."""
+        self.is_active = False
+        self.active_pid = None
+        if not self.session_dir.exists():
+            return
+        for lock_file in self.session_dir.glob("inuse.*.lock"):
+            try:
+                pid = int(lock_file.stem.split(".")[-1])
+            except ValueError:
+                continue
+            if _is_pid_alive(pid):
+                self.is_active = True
+                self.active_pid = pid
+                return
 
     @property
     def searchable(self) -> str:
