@@ -183,8 +183,8 @@ class TUI:
             ("Created", s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "?"),
             ("Updated", s.updated_at.strftime("%Y-%m-%d %H:%M") if s.updated_at else "?"),
             ("Age", s.age_str),
-            ("User messages", str(s.user_messages) if s.user_messages else "—"),
-            ("Agent turns", str(s.assistant_turns) if s.assistant_turns else "—"),
+            ("User messages", str(s.user_messages) if s.has_events else "—"),
+            ("Agent turns", str(s.assistant_turns) if s.has_events else "—"),
             ("Summaries", str(s.summary_count)),
         ]
         for label, val in fields:

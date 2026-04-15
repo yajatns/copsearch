@@ -192,14 +192,28 @@ def test_user_message_count(tmp_path: Path):
 
 
 def test_user_message_count_no_events(tmp_path: Path):
-    """Session without events.jsonl has zero counts."""
+    """Session without events.jsonl has zero counts and has_events=False."""
     _make_session_dir(tmp_path, "noevent-001", summary="No events")
 
     sessions = load_sessions(tmp_path)
     s = sessions[0]
     assert s.user_messages == 0
     assert s.assistant_turns == 0
+    assert s.has_events is False
     assert s.depth_str == "—"
+
+
+def test_user_message_count_zero_with_events(tmp_path: Path):
+    """Session with events.jsonl but no user messages shows '0', not '—'."""
+    d = _make_session_dir(tmp_path, "zero-001", summary="Zero msgs")
+    events = '{"type":"tool.execution_start","data":{"toolName":"bash"}}\n'
+    (d / "events.jsonl").write_text(events)
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.user_messages == 0
+    assert s.has_events is True
+    assert s.depth_str == "0"
 
 
 def test_delete_session(tmp_path: Path):

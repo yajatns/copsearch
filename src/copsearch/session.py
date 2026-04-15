@@ -61,6 +61,7 @@ class Session:
         "active_pid",
         "user_messages",
         "assistant_turns",
+        "has_events",
     )
 
     def __init__(self, data: dict, session_dir: Path):
@@ -121,16 +122,17 @@ class Session:
         events_path = session_dir / "events.jsonl"
         self.user_messages: int = 0
         self.assistant_turns: int = 0
-        if events_path.exists():
+        self.has_events: bool = events_path.exists()
+        if self.has_events:
             try:
-                with open(events_path, errors="replace") as f:
+                with events_path.open(encoding="utf-8", errors="replace") as f:
                     for line in f:
                         if '"user.message"' in line:
                             self.user_messages += 1
                         elif '"assistant.turn_start"' in line:
                             self.assistant_turns += 1
-            except Exception:
-                pass
+            except OSError:
+                self.has_events = False
 
     @property
     def display_summary(self) -> str:
@@ -140,10 +142,9 @@ class Session:
     @property
     def depth_str(self) -> str:
         """Human-readable session depth (user message count)."""
-        n = self.user_messages
-        if n == 0:
+        if not self.has_events:
             return "—"
-        return str(n)
+        return str(self.user_messages)
 
     @property
     def age_str(self) -> str:
