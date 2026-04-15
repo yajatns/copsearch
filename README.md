@@ -203,7 +203,8 @@ There are great session managers for Claude Code ([resume-resume](https://github
 
 - Python 3.10+
 - PyYAML (`pip install pyyaml`)
-- macOS or Linux (curses is built-in)
+- macOS, Linux, or Windows
+  - On Windows, `windows-curses` is auto-installed as a dependency
 
 ## Contributing
 
