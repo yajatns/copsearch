@@ -216,10 +216,10 @@ class TUI:
             self.scroll = 0
         elif key == ord("G"):
             self.cursor = max(0, len(self.sessions) - 1)
-        elif key == 4:  # Ctrl-D
+        elif key in (4, curses.KEY_NPAGE):  # Ctrl-D / PageDown
             h, _ = self.scr.getmaxyx()
             self.cursor = min(self.cursor + h // 2, max(0, len(self.sessions) - 1))
-        elif key == 21:  # Ctrl-U
+        elif key in (21, curses.KEY_PPAGE):  # Ctrl-U / PageUp
             h, _ = self.scr.getmaxyx()
             self.cursor = max(self.cursor - h // 2, 0)
         elif key == ord("/"):
@@ -265,6 +265,12 @@ class TUI:
             self.detail_scroll += 1
         elif key in (curses.KEY_UP, ord("k")):
             self.detail_scroll = max(0, self.detail_scroll - 1)
+        elif key in (4, curses.KEY_NPAGE):  # Ctrl-D / PageDown
+            h, _ = self.scr.getmaxyx()
+            self.detail_scroll += h // 2
+        elif key in (21, curses.KEY_PPAGE):  # Ctrl-U / PageUp
+            h, _ = self.scr.getmaxyx()
+            self.detail_scroll = max(0, self.detail_scroll - h // 2)
         elif key in (curses.KEY_ENTER, 10, 13, ord("r")):
             self._resume_session()
             return True
