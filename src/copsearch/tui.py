@@ -5,6 +5,7 @@ from __future__ import annotations
 import curses
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 
 from copsearch.filters import filter_sessions
@@ -365,7 +366,13 @@ class TUI:
         print(f"\n\033[1;32m▶ Resuming session in: {s.cwd}\033[0m")
         print(f"  {cmd}\n")
         os.chdir(s.cwd)
-        os.execlp("copilot", "copilot", "--resume", s.id)
+        if sys.platform == "win32":
+            # On Windows, execlp doesn't replace the process — use subprocess
+            import subprocess as _sp
+
+            raise SystemExit(_sp.call(["copilot", "--resume", s.id]))
+        else:
+            os.execlp("copilot", "copilot", "--resume", s.id)
 
     def _copy_resume_cmd(self) -> None:
         if not self.sessions:
@@ -373,16 +380,21 @@ class TUI:
         s = self.sessions[self.cursor]
         cmd = f"cd {s.cwd} && copilot --resume {s.id}"
         try:
-            subprocess.run(["pbcopy"], input=cmd.encode(), check=True)
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["clip"], input=cmd.encode(), check=True,
+                )
+            elif sys.platform == "darwin":
+                subprocess.run(
+                    ["pbcopy"], input=cmd.encode(), check=True,
+                )
+            else:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard"],
+                    input=cmd.encode(), check=True,
+                )
             self.message = "Copied resume command to clipboard"
-        except FileNotFoundError:
-            # Linux fallback
-            try:
-                subprocess.run(["xclip", "-selection", "clipboard"], input=cmd.encode(), check=True)
-                self.message = "Copied resume command to clipboard"
-            except Exception:
-                self.message = f"Resume: {cmd}"
-        except Exception:
+        except (FileNotFoundError, Exception):
             self.message = f"Resume: {cmd}"
 
     def _format_row(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,11 +15,26 @@ DEFAULT_SESSION_DIR = Path.home() / ".copilot" / "session-state"
 
 def _is_pid_alive(pid: int) -> bool:
     """Check if a process with the given PID is running."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ProcessLookupError):
-        return False
+    if sys.platform == "win32":
+        # On Windows, os.kill(pid, 0) doesn't work as expected.
+        # Use ctypes to call OpenProcess and check if it succeeds.
+        try:
+            import ctypes
+
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
+        except Exception:
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
 
 
 class Session:
