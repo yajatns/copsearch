@@ -16,7 +16,7 @@ class TUI:
 
     HELP_TEXT = (
         "↑↓/jk: navigate  /: search  p: project  b: branch  "
-        "d: since  c: clear  s: sort  Enter: details  r: resume  y: copy  q: quit"
+        "d: since  a: active  c: clear  s: sort  Enter: details  r: resume  y: copy  q: quit"
     )
 
     def __init__(self, sessions: list[Session]):
@@ -28,6 +28,7 @@ class TUI:
         self.filter_project = ""
         self.filter_branch = ""
         self.filter_since = ""
+        self.filter_active = False
         self.mode = "list"  # list | detail | input
         self.input_prompt = ""
         self.input_buffer = ""
@@ -55,6 +56,7 @@ class TUI:
         curses.init_pair(5, curses.COLOR_BLACK, curses.COLOR_YELLOW)  # input bar
         curses.init_pair(6, curses.COLOR_WHITE, -1)  # detail text
         curses.init_pair(7, curses.COLOR_MAGENTA, -1)  # plan header
+        curses.init_pair(8, curses.COLOR_GREEN, -1)  # active session indicator
 
         self.scr.timeout(100)
 
@@ -98,13 +100,17 @@ class TUI:
             filters_active.append(f"since:{self.filter_since}")
         if self.filter_text:
             filters_active.append(f"search:{self.filter_text}")
+        if self.filter_active:
+            filters_active.append("active-only")
 
+        active_count = sum(1 for s in self.all_sessions if s.is_active)
         filter_str = "  ".join(filters_active)
-        title_line = f"{title}  {filter_str}" if filter_str else title
+        active_badge = f"  [{active_count} live]" if active_count else ""
+        title_line = f"{title}{active_badge}  {filter_str}" if filter_str or active_badge else title
         self._addstr(0, 0, title_line[:w].ljust(w), curses.color_pair(2) | curses.A_BOLD)
 
         # Column header
-        col_hdr = self._format_row("Age", "Project", "Branch", "Summary", w)
+        col_hdr = self._format_row("", "Age", "Project", "Branch", "Summary", w)
         self._addstr(1, 0, col_hdr, curses.A_BOLD | curses.A_UNDERLINE)
 
         # Session rows
@@ -120,7 +126,11 @@ class TUI:
             if idx >= len(self.sessions):
                 break
             s = self.sessions[idx]
+            indicator = "●" if s.is_active else " "
+            plan_mark = "*" if s.has_plan else " "
+            prefix = f"{indicator}{plan_mark}"
             line = self._format_row(
+                prefix,
                 s.age_str,
                 s.project[:18],
                 (s.branch or "—")[:24],
@@ -128,9 +138,10 @@ class TUI:
                 w,
             )
             attr = curses.color_pair(1) | curses.A_BOLD if idx == self.cursor else 0
-            if s.has_plan:
-                line = "* " + line[2:] if w > 30 else line
             self._addstr(row, 0, line[:w].ljust(w), attr)
+            # Draw the active indicator in green if active (overwrite first char)
+            if s.is_active and idx != self.cursor:
+                self._addstr(row, 0, "●", curses.color_pair(8) | curses.A_BOLD)
 
         # Status bar
         status = f" {len(self.sessions)}/{len(self.all_sessions)} sessions"
@@ -153,6 +164,7 @@ class TUI:
         lines.append(("", 0))
 
         fields = [
+            ("Status", f"● ACTIVE (PID {s.active_pid})" if s.is_active else "idle"),
             ("Summary", s.summary or "—"),
             ("Project", s.project),
             ("Directory", s.cwd),
@@ -164,7 +176,10 @@ class TUI:
             ("Summaries", str(s.summary_count)),
         ]
         for label, val in fields:
-            lines.append((f"  {label + ':':<14} {val}", curses.color_pair(6)))
+            attr = curses.color_pair(6)
+            if label == "Status" and s.is_active:
+                attr = curses.color_pair(8) | curses.A_BOLD
+            lines.append((f"  {label + ':':<14} {val}", attr))
 
         lines.append(("", 0))
 
@@ -235,6 +250,7 @@ class TUI:
             self.filter_project = ""
             self.filter_branch = ""
             self.filter_since = ""
+            self.filter_active = False
             self._apply_filters()
             self.message = "Filters cleared"
         elif key == ord("s"):
@@ -243,6 +259,10 @@ class TUI:
             self.sort_key = sorts[idx]
             self._sort_sessions()
             self.message = f"Sort: {self.sort_key}"
+        elif key == ord("a"):
+            self.filter_active = not self.filter_active
+            self._apply_filters()
+            self.message = "Active sessions only" if self.filter_active else "Showing all sessions"
         elif key in (curses.KEY_ENTER, 10, 13):
             if self.sessions:
                 self.mode = "detail"
@@ -320,6 +340,8 @@ class TUI:
             since=self.filter_since,
             query=self.filter_text,
         )
+        if self.filter_active:
+            self.sessions = [s for s in self.sessions if s.is_active]
         self.cursor = min(self.cursor, max(0, len(self.sessions) - 1))
         self.scroll = 0
 
@@ -363,12 +385,19 @@ class TUI:
         except Exception:
             self.message = f"Resume: {cmd}"
 
-    def _format_row(self, age: str, project: str, branch: str, summary: str, w: int) -> str:
-        w_age = 6
+    def _format_row(
+        self, prefix: str, age: str, project: str,
+        branch: str, summary: str, w: int,
+    ) -> str:
+        w_pre = 3
+        w_age = 5
         w_proj = 20
         w_branch = 26
-        w_summ = max(w - w_age - w_proj - w_branch - 3, 10)
-        return f"{age:<{w_age}}{project:<{w_proj}}{branch:<{w_branch}}{summary[:w_summ]}"
+        w_summ = max(w - w_pre - w_age - w_proj - w_branch - 3, 10)
+        return (
+            f"{prefix:<{w_pre}}{age:<{w_age}}{project:<{w_proj}}"
+            f"{branch:<{w_branch}}{summary[:w_summ]}"
+        )
 
     def _addstr(self, y: int, x: int, text: str, attr: int = 0) -> None:
         try:

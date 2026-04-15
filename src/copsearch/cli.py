@@ -23,18 +23,21 @@ def print_table(sessions: list[Session]) -> None:
     w_branch = max((len(s.branch) for s in sessions[:50] if s.branch), default=6)
     w_branch = min(max(w_branch, 6), 30)
 
-    hdr = f"{'Age':<{w_age}} {'Project':<{w_proj}} {'Branch':<{w_branch}} Summary"
+    hdr = f"  {'Age':<{w_age}} {'Project':<{w_proj}} {'Branch':<{w_branch}} Summary"
     print(f"\033[1m{hdr}\033[0m")
     print("─" * min(len(hdr) + 30, 120))
 
     for s in sessions:
+        indicator = "\033[32m●\033[0m" if s.is_active else " "
         age = s.age_str
         proj = s.project[:w_proj]
         br = (s.branch or "—")[:w_branch]
         summ = s.display_summary[:60]
-        print(f"{age:<{w_age}} {proj:<{w_proj}} {br:<{w_branch}} {summ}")
+        print(f"{indicator} {age:<{w_age}} {proj:<{w_proj}} {br:<{w_branch}} {summ}")
 
-    print(f"\n{len(sessions)} session(s)")
+    active_count = sum(1 for s in sessions if s.is_active)
+    suffix = f"  ({active_count} active)" if active_count else ""
+    print(f"\n{len(sessions)} session(s){suffix}")
 
 
 def main() -> None:
@@ -63,6 +66,9 @@ def main() -> None:
         "--id", default="", help="Print resume command for a specific session ID (prefix match)"
     )
     parser.add_argument(
+        "-a", "--active", action="store_true", help="Show only active (running) sessions"
+    )
+    parser.add_argument(
         "-V", "--version", action="store_true", help="Print version and exit"
     )
     args = parser.parse_args()
@@ -89,8 +95,10 @@ def main() -> None:
         sys.exit(0)
 
     filtered = filter_sessions(sessions, args.project, args.branch, args.since, args.query)
+    if args.active:
+        filtered = [s for s in filtered if s.is_active]
 
-    has_any_filter = args.project or args.branch or args.since or args.query
+    has_any_filter = args.project or args.branch or args.since or args.query or args.active
 
     if args.list or has_any_filter:
         print_table(filtered)
