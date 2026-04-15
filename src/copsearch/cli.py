@@ -50,11 +50,12 @@ def main() -> None:
             examples:
               copsearch                          # interactive TUI
               copsearch --list                   # print all sessions
-              copsearch -p Integration           # filter by project
-              copsearch -b 'yaj/*'               # filter by branch glob
+              copsearch --active                 # show only running sessions
+              copsearch -p webapp                # filter by project
+              copsearch -b 'feat/*'              # filter by branch glob
               copsearch --since 7d               # last 7 days
-              copsearch -q "RSS funeth"          # search in summaries/plans
-              copsearch -p Integration -b master --since 3d  # combined
+              copsearch -q "database migration"  # search in summaries/plans
+              copsearch -p webapp --since 3d     # combined filters
         """),
     )
     parser.add_argument("-l", "--list", action="store_true", help="Non-interactive table output")

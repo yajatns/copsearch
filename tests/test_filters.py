@@ -28,25 +28,25 @@ def _make_session_dir(tmp_path: Path, session_id: str, **kwargs) -> Path:
 
 
 def test_filter_by_project(tmp_path: Path):
-    _make_session_dir(tmp_path, "s1", cwd="/a/Integration")
-    _make_session_dir(tmp_path, "s2", cwd="/a/FunTools")
-    _make_session_dir(tmp_path, "s3", cwd="/a/Integration")
+    _make_session_dir(tmp_path, "s1", cwd="/a/webapp")
+    _make_session_dir(tmp_path, "s2", cwd="/a/api-server")
+    _make_session_dir(tmp_path, "s3", cwd="/a/webapp")
 
     sessions = load_sessions(tmp_path)
-    result = filter_sessions(sessions, project="Integration")
+    result = filter_sessions(sessions, project="webapp")
     assert len(result) == 2
-    assert all("Integration" in s.cwd for s in result)
+    assert all("webapp" in s.cwd for s in result)
 
 
 def test_filter_by_branch_glob(tmp_path: Path):
-    _make_session_dir(tmp_path, "s1", branch="yaj/feature-a")
+    _make_session_dir(tmp_path, "s1", branch="feat/parser-v2")
     _make_session_dir(tmp_path, "s2", branch="main")
-    _make_session_dir(tmp_path, "s3", branch="yaj/feature-b")
+    _make_session_dir(tmp_path, "s3", branch="feat/dark-mode")
 
     sessions = load_sessions(tmp_path)
-    result = filter_sessions(sessions, branch="yaj/*")
+    result = filter_sessions(sessions, branch="feat/*")
     assert len(result) == 2
-    assert all(s.branch.startswith("yaj/") for s in result)
+    assert all(s.branch.startswith("feat/") for s in result)
 
 
 def test_filter_by_since(tmp_path: Path):
@@ -60,22 +60,25 @@ def test_filter_by_since(tmp_path: Path):
 
 
 def test_filter_by_query(tmp_path: Path):
-    _make_session_dir(tmp_path, "s1", summary="RSS throughput test")
-    _make_session_dir(tmp_path, "s2", summary="DPC CLI improvements")
-    _make_session_dir(tmp_path, "s3", summary="funeth RSS hash fix")
+    _make_session_dir(tmp_path, "s1", summary="PDF parser throughput test")
+    _make_session_dir(tmp_path, "s2", summary="Dark mode CSS improvements")
+    _make_session_dir(tmp_path, "s3", summary="parser OCR hash fix")
 
     sessions = load_sessions(tmp_path)
-    result = filter_sessions(sessions, query="RSS")
+    result = filter_sessions(sessions, query="parser")
     assert len(result) == 2
 
 
 def test_filter_combined(tmp_path: Path):
-    _make_session_dir(tmp_path, "s1", cwd="/a/Integration", branch="yaj/rss", summary="RSS test")
-    _make_session_dir(tmp_path, "s2", cwd="/a/Integration", branch="main", summary="other")
-    _make_session_dir(tmp_path, "s3", cwd="/a/FunTools", branch="yaj/rss", summary="RSS fix")
+    _make_session_dir(tmp_path, "s1", cwd="/a/webapp", branch="feat/search", summary="search test")
+    _make_session_dir(tmp_path, "s2", cwd="/a/webapp", branch="main", summary="other")
+    _make_session_dir(
+        tmp_path, "s3", cwd="/a/api-server",
+        branch="feat/search", summary="search fix",
+    )
 
     sessions = load_sessions(tmp_path)
-    result = filter_sessions(sessions, project="Integration", branch="yaj/*", query="RSS")
+    result = filter_sessions(sessions, project="webapp", branch="feat/*", query="search")
     assert len(result) == 1
     assert result[0].id == "s1"
 
@@ -91,11 +94,11 @@ def test_filter_empty_returns_all(tmp_path: Path):
 
 def test_query_searches_plan_text(tmp_path: Path):
     _make_session_dir(
-        tmp_path, "s1", summary="Some session", plan_text="# Fix WHLK certification"
+        tmp_path, "s1", summary="Some session", plan_text="# Fix OAuth token refresh"
     )
     _make_session_dir(tmp_path, "s2", summary="Other session")
 
     sessions = load_sessions(tmp_path)
-    result = filter_sessions(sessions, query="WHLK")
+    result = filter_sessions(sessions, query="OAuth")
     assert len(result) == 1
     assert result[0].id == "s1"

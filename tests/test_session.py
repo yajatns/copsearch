@@ -102,17 +102,17 @@ def test_searchable_field(tmp_path: Path):
     _make_session_dir(
         tmp_path,
         "ggg-777",
-        summary="RSS throughput test",
-        branch="yaj/rss-fix",
-        cwd="/Users/test/Integration",
+        summary="PDF parser throughput test",
+        branch="feat/parser-fix",
+        cwd="/Users/test/openclaw",
     )
 
     sessions = load_sessions(tmp_path)
     s = sessions[0]
-    assert "rss" in s.searchable
+    assert "pdf" in s.searchable
     assert "throughput" in s.searchable
-    assert "integration" in s.searchable
-    assert "yaj/rss-fix" in s.searchable
+    assert "openclaw" in s.searchable
+    assert "feat/parser-fix" in s.searchable
 
 
 def test_age_str(tmp_path: Path):
