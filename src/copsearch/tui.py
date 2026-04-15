@@ -30,7 +30,7 @@ class TUI:
         self.filter_branch = ""
         self.filter_since = ""
         self.filter_active = False
-        self.mode = "list"  # list | detail | input
+        self.mode = "list"  # list | detail | input | confirm_delete
         self.input_prompt = ""
         self.input_buffer = ""
         self.input_target = ""
@@ -58,6 +58,7 @@ class TUI:
         curses.init_pair(6, curses.COLOR_WHITE, -1)  # detail text
         curses.init_pair(7, curses.COLOR_MAGENTA, -1)  # plan header
         curses.init_pair(8, curses.COLOR_GREEN, -1)  # active session indicator
+        curses.init_pair(9, curses.COLOR_RED, curses.COLOR_BLACK)  # delete confirm
 
         self.scr.timeout(100)
 
@@ -72,13 +73,18 @@ class TUI:
             elif self.mode == "input":
                 self._draw_list(h, w)
                 self._draw_input_bar(h, w)
+            elif self.mode == "confirm_delete":
+                self._draw_detail(h, w)
+                self._draw_confirm_bar(h, w)
 
             self.scr.refresh()
             key = self.scr.getch()
             if key == -1:
                 continue
 
-            if self.mode == "input":
+            if self.mode == "confirm_delete":
+                self._handle_confirm_delete(key)
+            elif self.mode == "input":
                 self._handle_input(key)
             elif self.mode == "detail":
                 if self._handle_detail(key):
@@ -201,7 +207,7 @@ class TUI:
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
         lines.append(("", 0))
         lines.append(
-            ("  Press Esc/q to go back, Enter/r to resume, y to copy resume cmd", curses.A_DIM)
+            ("  Press Esc/q: back  Enter/r: resume  y: copy  D: delete", curses.A_DIM)
         )
 
         visible = h - 1
@@ -222,7 +228,30 @@ class TUI:
         prompt = f" {self.input_prompt}: {self.input_buffer}_"
         self._addstr(h - 2, 0, prompt[:w].ljust(w), curses.color_pair(5))
 
+    def _draw_confirm_bar(self, h: int, w: int) -> None:
+        s = self.sessions[self.cursor]
+        label = s.project or s.id[:12]
+        prompt = f" ⚠ Delete session '{label}'? (y/N) "
+        self._addstr(h - 2, 0, prompt[:w].ljust(w), curses.color_pair(9) | curses.A_BOLD)
+
     # ── Key Handling ─────────────────────────────────────────────────────
+
+    def _handle_confirm_delete(self, key: int) -> None:
+        """Handle y/n confirmation for session deletion."""
+        if key == ord("y"):
+            s = self.sessions[self.cursor]
+            if s.delete():
+                self.all_sessions.remove(s)
+                self.sessions.remove(s)
+                self.cursor = min(self.cursor, max(0, len(self.sessions) - 1))
+                self.message = f"Deleted session: {s.project or s.id[:12]}"
+            else:
+                self.message = "Failed to delete session"
+            self.mode = "list"
+        else:
+            # Any other key cancels
+            self.message = "Delete cancelled"
+            self.mode = "detail"
 
     def _handle_list(self, key: int) -> bool:
         """Handle keypress in list mode. Returns True to quit."""
@@ -302,6 +331,12 @@ class TUI:
             return True
         elif key == ord("y"):
             self._copy_resume_cmd()
+        elif key == ord("D"):
+            s = self.sessions[self.cursor]
+            if s.is_active:
+                self.message = "Cannot delete an active session"
+            else:
+                self.mode = "confirm_delete"
         return False
 
     def _handle_input(self, key: int) -> None:

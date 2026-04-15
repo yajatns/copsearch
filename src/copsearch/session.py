@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,7 @@ class Session:
 
     __slots__ = (
         "id",
+        "session_dir",
         "cwd",
         "project",
         "git_root",
@@ -63,6 +65,7 @@ class Session:
 
     def __init__(self, data: dict, session_dir: Path):
         self.id: str = data.get("id", "")
+        self.session_dir: Path = session_dir
         self.cwd: str = data.get("cwd", "")
         self.project: str = os.path.basename(self.cwd) if self.cwd else ""
         self.git_root: str = data.get("git_root", "")
@@ -162,6 +165,14 @@ class Session:
         """Formatted date string for display."""
         d = self.updated_at or self.created_at
         return d.strftime("%Y-%m-%d %H:%M") if d else "?"
+
+    def delete(self) -> bool:
+        """Delete the session directory. Returns True on success."""
+        try:
+            shutil.rmtree(self.session_dir)
+            return True
+        except Exception:
+            return False
 
     @property
     def searchable(self) -> str:

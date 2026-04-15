@@ -1,5 +1,6 @@
 """Tests for session loader."""
 
+import os
 from pathlib import Path
 
 import yaml
@@ -199,3 +200,26 @@ def test_user_message_count_no_events(tmp_path: Path):
     assert s.user_messages == 0
     assert s.assistant_turns == 0
     assert s.depth_str == "—"
+
+
+def test_delete_session(tmp_path: Path):
+    """Session.delete() removes the session directory."""
+    d = _make_session_dir(tmp_path, "del-001", summary="To be deleted")
+    assert d.exists()
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.delete() is True
+    assert not d.exists()
+
+
+def test_delete_active_session_still_works(tmp_path: Path):
+    """Delete method works even on active sessions (TUI guards this)."""
+    d = _make_session_dir(tmp_path, "active-del-001", summary="Active delete")
+    (d / f"inuse.{os.getpid()}.lock").write_text("")
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.is_active is True
+    assert s.delete() is True
+    assert not d.exists()
