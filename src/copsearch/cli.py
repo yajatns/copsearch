@@ -18,22 +18,30 @@ def print_table(sessions: list[Session]) -> None:
         return
 
     w_age = 5
+    w_msgs = 4
     w_proj = max(len(s.project) for s in sessions[:50])
     w_proj = min(max(w_proj, 8), 20)
     w_branch = max((len(s.branch) for s in sessions[:50] if s.branch), default=6)
     w_branch = min(max(w_branch, 6), 30)
 
-    hdr = f"  {'Age':<{w_age}} {'Project':<{w_proj}} {'Branch':<{w_branch}} Summary"
+    hdr = (
+        f"  {'Age':<{w_age}} {'Msgs':>{w_msgs}} "
+        f"{'Project':<{w_proj}} {'Branch':<{w_branch}} Summary"
+    )
     print(f"\033[1m{hdr}\033[0m")
     print("─" * min(len(hdr) + 30, 120))
 
     for s in sessions:
         indicator = "\033[32m●\033[0m" if s.is_active else " "
         age = s.age_str
+        msgs = s.depth_str
         proj = s.project[:w_proj]
         br = (s.branch or "—")[:w_branch]
         summ = s.display_summary[:60]
-        print(f"{indicator} {age:<{w_age}} {proj:<{w_proj}} {br:<{w_branch}} {summ}")
+        print(
+            f"{indicator} {age:<{w_age}} {msgs:>{w_msgs}} "
+            f"{proj:<{w_proj}} {br:<{w_branch}} {summ}"
+        )
 
     active_count = sum(1 for s in sessions if s.is_active)
     suffix = f"  ({active_count} active)" if active_count else ""
