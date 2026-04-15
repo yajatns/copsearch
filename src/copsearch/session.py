@@ -12,6 +12,15 @@ import yaml
 DEFAULT_SESSION_DIR = Path.home() / ".copilot" / "session-state"
 
 
+def _is_pid_alive(pid: int) -> bool:
+    """Check if a process with the given PID is running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+
 class Session:
     """Represents a single Copilot CLI session with its metadata."""
 
@@ -30,6 +39,8 @@ class Session:
         "plan_text",
         "checkpoint_count",
         "has_plan",
+        "is_active",
+        "active_pid",
     )
 
     def __init__(self, data: dict, session_dir: Path):
@@ -44,6 +55,19 @@ class Session:
 
         self.created_at: datetime | None = _parse_date(data.get("created_at"))
         self.updated_at: datetime | None = _parse_date(data.get("updated_at"))
+
+        # Detect active session via inuse.*.lock files
+        self.is_active: bool = False
+        self.active_pid: int | None = None
+        for lock_file in session_dir.glob("inuse.*.lock"):
+            try:
+                pid = int(lock_file.stem.split(".")[-1])
+                if _is_pid_alive(pid):
+                    self.is_active = True
+                    self.active_pid = pid
+                    break
+            except (ValueError, IndexError):
+                continue
 
         # Load plan.md if present
         plan_path = session_dir / "plan.md"

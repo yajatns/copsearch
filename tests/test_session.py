@@ -130,3 +130,39 @@ def test_skips_bad_yaml(tmp_path: Path):
 
     sessions = load_sessions(tmp_path)
     assert sessions == []
+
+
+def test_active_session_with_live_pid(tmp_path: Path):
+    """Session with inuse lock matching a running PID is marked active."""
+    import os
+
+    d = _make_session_dir(tmp_path, "active-001", summary="Active session")
+    # Use our own PID — guaranteed to be alive
+    (d / f"inuse.{os.getpid()}.lock").write_text("")
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.is_active is True
+    assert s.active_pid == os.getpid()
+
+
+def test_inactive_session_with_stale_lock(tmp_path: Path):
+    """Session with inuse lock for a dead PID is not active."""
+    d = _make_session_dir(tmp_path, "stale-001", summary="Stale lock")
+    # PID 999999 is almost certainly not running
+    (d / "inuse.999999.lock").write_text("")
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.is_active is False
+    assert s.active_pid is None
+
+
+def test_session_without_lock_is_inactive(tmp_path: Path):
+    """Session with no lock file is not active."""
+    _make_session_dir(tmp_path, "nolock-001", summary="No lock")
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.is_active is False
+    assert s.active_pid is None

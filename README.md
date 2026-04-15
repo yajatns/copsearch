@@ -4,6 +4,10 @@
 
 **Browse, filter, and resume GitHub Copilot CLI sessions from your terminal.**
 
+[![CI](https://github.com/yajatns/copsearch/actions/workflows/ci.yml/badge.svg)](https://github.com/yajatns/copsearch/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-green.svg)](https://www.python.org/)
+
 </div>
 
 ---
@@ -11,15 +15,27 @@
 If you use [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli) daily, you know the problem: sessions pile up and there's no built-in way to find the one you need. `copsearch` gives you a fast, standalone tool to search and resume sessions *before* you even start Copilot.
 
 ```
-$ copsearch -q "RSS funeth"
-Age   Project     Branch                    Summary
-────────────────────────────────────────────────────────────────────────────────
-1h    Integration yaj/rss-traffic-dna-down  WHLK Certification Resumption Plan
-2h    Integration yaj/rss-traffic-dna-down  Run RSS Traffic Without DNA
-20h   s21f1       master                    Plan: Add RSS Test Cases to funeth_tests.py
-14d   Integration yajsingh/funeth-rss-tests Fix Git Pull Error
+$ copsearch --active
 
-4 session(s)
+   Age   Project          Branch                    Summary
+────────────────────────────────────────────────────────────────────────────────
+● 12m   openclaw         feat/parser-v2            Rewrite PDF parser to handle multi-column layouts
+● 1h    dotfiles         main                      Neovim LSP config for Rust + Go
+● 3h    openclaw         fix/ocr-confidence        OCR confidence scoring — false positives on tables
+
+3 session(s)  (3 active)
+```
+
+```
+$ copsearch -q "database migration"
+
+   Age   Project          Branch                    Summary
+────────────────────────────────────────────────────────────────────────────────
+  2h    webapp           feat/postgres-16           Migrate from SQLite to Postgres 16
+  1d    api-server       fix/migration-rollback     Fix: rollback migration leaves orphan indexes
+  5d    webapp           feat/postgres-16           Schema design for user preferences table
+
+3 session(s)
 ```
 
 ## Features
@@ -27,21 +43,20 @@ Age   Project     Branch                    Summary
 | Feature | Description |
 |---------|-------------|
 | **Interactive TUI** | Curses-based browser with arrow-key navigation, vim keybindings |
-| **Project filter** | `-p Integration` — substring match on project name, repo, or path |
-| **Branch filter** | `-b 'yaj/*'` — glob pattern matching on branch names |
+| **Active sessions** | `●` indicator shows which sessions are running in other terminals |
+| **Active filter** | `-a` / press `a` in TUI — show only live sessions |
+| **Project filter** | `-p webapp` — substring match on project name, repo, or path |
+| **Branch filter** | `-b 'feat/*'` — glob pattern matching on branch names |
 | **Date filter** | `--since 7d` — relative time (`7d`, `24h`, `30m`) or ISO dates |
-| **Full-text search** | `-q "RSS funeth"` — searches summaries, plans, branches, paths |
+| **Full-text search** | `-q "database migration"` — searches summaries, plans, branches, paths |
 | **Detail view** | View full plan.md, metadata, and checkpoint info for any session |
-| **Quick resume** | Press `r` or use `--id` to get the resume command with correct `cd` |
-| **Clipboard copy** | Press `y` to copy `cd <dir> && copilot -r <id>` to clipboard |
+| **Quick resume** | Press `Enter` in detail view to resume (launches Copilot in the correct directory) |
+| **Clipboard copy** | Press `y` to copy `cd <dir> && copilot --resume <id>` to clipboard |
 | **Zero dependencies** | Only needs Python 3.10+ and PyYAML (usually pre-installed) |
 
 ## Install
 
 ```bash
-# From PyPI (once published)
-pip install copsearch
-
 # From source
 git clone https://github.com/yajatns/copsearch.git
 cd copsearch
@@ -59,19 +74,23 @@ copsearch
 ```
 
 ```
-┌─ copsearch — Copilot Session Browser ─────────────────────────────┐
-│ Age   Project            Branch                    Summary        │
-│ ──────────────────────────────────────────────────────────────── │
-│ 1h    Integration        yaj/rss-traffic-dna-down  WHLK Cert...  │
-│ 2h    IntegrationTools   yaj/skill-test-case-docs  AI Onboard... │
-│ 12h   exe                main                      DPUUtility... │
-│ 20h   s21f1              master                    RSS Tests...   │
-│ 1d    FunTools           yaj/dpc_cli_improvements  DPC CLI...     │
-│                                                                   │
-│ 131/131 sessions                                                  │
-│ ↑↓/jk: navigate  /: search  p: project  b: branch  r: resume    │
-└───────────────────────────────────────────────────────────────────┘
+┌─ copsearch — Copilot Session Browser ──── [3 live] ──────────────┐
+│    Age   Project            Branch                Summary        │
+│ ────────────────────────────────────────────────────────────────  │
+│ ●  1h    openclaw           feat/parser-v2        Rewrite PDF... │
+│ ●  3h    openclaw           fix/ocr-confidence    OCR scoring... │
+│ ●  5h    dotfiles           main                  Neovim LSP...  │
+│ *  1d    webapp             feat/postgres-16      Migrate to...  │
+│    1d    api-server         fix/migration-rollback Fix rollba... │
+│    3d    ml-pipeline        main                  Add data va... │
+│    5d    blog               feat/dark-mode        CSS dark mo... │
+│                                                                  │
+│ 42/42 sessions                                                   │
+│ ↑↓/jk: navigate  /: search  a: active  Enter: details  q: quit  │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+**Legend:** `●` = session is running in another terminal, `*` = session has a plan.md
 
 #### TUI Keybindings
 
@@ -79,15 +98,17 @@ copsearch
 |-----|--------|
 | `↑`/`↓` or `j`/`k` | Navigate sessions |
 | `g` / `G` | Jump to top / bottom |
-| `Ctrl-D` / `Ctrl-U` | Half-page down / up |
+| `Ctrl-D` / `Ctrl-U` or `PgDn`/`PgUp` | Half-page down / up |
 | `/` | Search across all session text |
 | `p` | Filter by project |
 | `b` | Filter by branch (glob pattern) |
 | `d` | Filter by date/age |
+| `a` | Toggle: show only active (running) sessions |
 | `c` | Clear all filters |
 | `s` | Cycle sort: updated → project → branch |
 | `Enter` | Detail view (full metadata + plan.md) |
-| `r` | Resume session (launches Copilot in correct dir) |
+| `Enter` (in detail) | Resume session (launches Copilot in correct dir) |
+| `r` | Resume session |
 | `y` | Copy resume command to clipboard |
 | `q` | Quit |
 
@@ -96,24 +117,27 @@ copsearch
 When you pass any filter flag, `copsearch` prints a table and exits (no TUI):
 
 ```bash
+# Show only active sessions (running in other terminals)
+copsearch --active
+
 # Filter by project
-copsearch -p Integration
+copsearch -p openclaw
 
 # Filter by branch glob
-copsearch -b 'yaj/*'
+copsearch -b 'feat/*'
 
 # Last 7 days only
 copsearch --since 7d
 
 # Full-text search
-copsearch -q "RSS funeth"
+copsearch -q "parser PDF"
 
 # Combine filters
-copsearch -p Integration -b master --since 3d
+copsearch -p webapp -b 'feat/*' --since 3d
 
 # Get resume command for a session (prefix match on ID)
 copsearch --id 884bb
-# → cd /Users/you/project && copilot -r 884bb6a6-...
+# → cd /home/user/projects/openclaw && copilot --resume 884bb6a6-...
 
 # List everything
 copsearch --list
@@ -128,20 +152,23 @@ copsearch --list
 ├── <session-uuid>/
 │   ├── workspace.yaml      # id, cwd, branch, repo, summary, dates
 │   ├── plan.md             # task plan (if created during session)
+│   ├── inuse.<PID>.lock    # present while session is running ← active detection!
 │   ├── checkpoints/
 │   │   └── index.md        # checkpoint history
 │   └── files/              # session artifacts
 └── ...
 ```
 
+**Active session detection** works by checking `inuse.<PID>.lock` files — if the PID is still running, the session is live. This lets `copsearch` show you which sessions are open in other terminal windows.
+
 Each session's `workspace.yaml` contains metadata like:
 
 ```yaml
 id: 884bb6a6-5491-470f-9af7-5e866ff38afc
-cwd: /Users/you/project
-repository: org/repo
-branch: yaj/feature
-summary: Fix the critical bug
+cwd: /home/user/projects/openclaw
+repository: org/openclaw
+branch: feat/parser-v2
+summary: Rewrite PDF parser to handle multi-column layouts
 created_at: 2026-04-07T16:59:51Z
 updated_at: 2026-04-14T17:57:52Z
 ```
@@ -155,7 +182,7 @@ copsearch/
 ├── src/copsearch/
 │   ├── __init__.py      # Package version
 │   ├── cli.py           # CLI entry point and argument parsing
-│   ├── session.py       # Session data model and loader
+│   ├── session.py       # Session data model, loader, active detection
 │   ├── filters.py       # Filtering logic
 │   └── tui.py           # Curses-based interactive TUI
 ├── tests/
@@ -177,6 +204,10 @@ There are great session managers for Claude Code ([resume-resume](https://github
 - Python 3.10+
 - PyYAML (`pip install pyyaml`)
 - macOS or Linux (curses is built-in)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
 ## License
 
