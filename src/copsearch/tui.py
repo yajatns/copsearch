@@ -207,7 +207,7 @@ class TUI:
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
         lines.append(("", 0))
         lines.append(
-            ("  Press Esc/q: back  Enter/r: resume  y: copy  D: delete", curses.A_DIM)
+            ("  Press Esc/q: back  Enter/r: resume  y: copy  d: delete", curses.A_DIM)
         )
 
         visible = h - 1
@@ -331,7 +331,7 @@ class TUI:
             return True
         elif key == ord("y"):
             self._copy_resume_cmd()
-        elif key == ord("D"):
+        elif key in (ord("D"), ord("d")):
             s = self.sessions[self.cursor]
             if s.is_active:
                 self.message = "Cannot delete an active session"
