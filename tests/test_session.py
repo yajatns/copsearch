@@ -1,5 +1,6 @@
 """Tests for session loader."""
 
+import os
 from pathlib import Path
 
 import yaml
@@ -134,8 +135,6 @@ def test_skips_bad_yaml(tmp_path: Path):
 
 def test_active_session_with_live_pid(tmp_path: Path):
     """Session with inuse lock matching a running PID is marked active."""
-    import os
-
     d = _make_session_dir(tmp_path, "active-001", summary="Active session")
     # Use our own PID — guaranteed to be alive
     (d / f"inuse.{os.getpid()}.lock").write_text("")
@@ -191,11 +190,48 @@ def test_user_message_count(tmp_path: Path):
 
 
 def test_user_message_count_no_events(tmp_path: Path):
-    """Session without events.jsonl has zero counts."""
+    """Session without events.jsonl has zero counts and has_events=False."""
     _make_session_dir(tmp_path, "noevent-001", summary="No events")
 
     sessions = load_sessions(tmp_path)
     s = sessions[0]
     assert s.user_messages == 0
     assert s.assistant_turns == 0
+    assert s.has_events is False
     assert s.depth_str == "—"
+
+
+def test_user_message_count_zero_with_events(tmp_path: Path):
+    """Session with events.jsonl but no user messages shows '0', not '—'."""
+    d = _make_session_dir(tmp_path, "zero-001", summary="Zero msgs")
+    events = '{"type":"tool.execution_start","data":{"toolName":"bash"}}\n'
+    (d / "events.jsonl").write_text(events)
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.user_messages == 0
+    assert s.has_events is True
+    assert s.depth_str == "0"
+
+
+def test_delete_session(tmp_path: Path):
+    """Session.delete() removes the session directory."""
+    d = _make_session_dir(tmp_path, "del-001", summary="To be deleted")
+    assert d.exists()
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.delete() is True
+    assert not d.exists()
+
+
+def test_delete_active_session_still_works(tmp_path: Path):
+    """Delete method works even on active sessions (TUI guards this)."""
+    d = _make_session_dir(tmp_path, "active-del-001", summary="Active delete")
+    (d / f"inuse.{os.getpid()}.lock").write_text("")
+
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.is_active is True
+    assert s.delete() is True
+    assert not d.exists()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,7 @@ class Session:
 
     __slots__ = (
         "id",
+        "session_dir",
         "cwd",
         "project",
         "git_root",
@@ -59,10 +61,12 @@ class Session:
         "active_pid",
         "user_messages",
         "assistant_turns",
+        "has_events",
     )
 
     def __init__(self, data: dict, session_dir: Path):
         self.id: str = data.get("id", "")
+        self.session_dir: Path = session_dir
         self.cwd: str = data.get("cwd", "")
         self.project: str = os.path.basename(self.cwd) if self.cwd else ""
         self.git_root: str = data.get("git_root", "")
@@ -118,16 +122,17 @@ class Session:
         events_path = session_dir / "events.jsonl"
         self.user_messages: int = 0
         self.assistant_turns: int = 0
-        if events_path.exists():
+        self.has_events: bool = events_path.exists()
+        if self.has_events:
             try:
-                with open(events_path, errors="replace") as f:
+                with events_path.open(encoding="utf-8", errors="replace") as f:
                     for line in f:
                         if '"user.message"' in line:
                             self.user_messages += 1
                         elif '"assistant.turn_start"' in line:
                             self.assistant_turns += 1
-            except Exception:
-                pass
+            except OSError:
+                self.has_events = False
 
     @property
     def display_summary(self) -> str:
@@ -137,10 +142,9 @@ class Session:
     @property
     def depth_str(self) -> str:
         """Human-readable session depth (user message count)."""
-        n = self.user_messages
-        if n == 0:
+        if not self.has_events:
             return "—"
-        return str(n)
+        return str(self.user_messages)
 
     @property
     def age_str(self) -> str:
@@ -162,6 +166,32 @@ class Session:
         """Formatted date string for display."""
         d = self.updated_at or self.created_at
         return d.strftime("%Y-%m-%d %H:%M") if d else "?"
+
+    def delete(self) -> bool:
+        """Delete the session directory. Returns True on success."""
+        try:
+            shutil.rmtree(self.session_dir)
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+
+    def refresh_active(self) -> None:
+        """Re-check active status from on-disk lock files."""
+        self.is_active = False
+        self.active_pid = None
+        if not self.session_dir.exists():
+            return
+        for lock_file in self.session_dir.glob("inuse.*.lock"):
+            try:
+                pid = int(lock_file.stem.split(".")[-1])
+            except ValueError:
+                continue
+            if _is_pid_alive(pid):
+                self.is_active = True
+                self.active_pid = pid
+                return
 
     @property
     def searchable(self) -> str:
