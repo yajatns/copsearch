@@ -409,11 +409,18 @@ class TUI:
         s = self.sessions[self.cursor]
         curses.endwin()
         cmd = f"copilot --resume {s.id}"
-        print(f"\n\033[1;32m▶ Resuming session in: {s.cwd}\033[0m")
+
+        # Handle stale/moved directories
+        target_dir = s.cwd
+        if not os.path.isdir(target_dir):
+            print(f"\n\033[1;33m⚠ Directory no longer exists: {target_dir}\033[0m")
+            print("  Resuming from home directory instead.\n")
+            target_dir = os.path.expanduser("~")
+
+        print(f"\n\033[1;32m▶ Resuming session in: {target_dir}\033[0m")
         print(f"  {cmd}\n")
-        os.chdir(s.cwd)
+        os.chdir(target_dir)
         if sys.platform == "win32":
-            # On Windows, execlp doesn't replace the process — use subprocess
             import subprocess as _sp
 
             raise SystemExit(_sp.call(["copilot", "--resume", s.id]))
