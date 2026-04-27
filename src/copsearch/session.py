@@ -189,15 +189,18 @@ class Session:
             return False
         try:
             data = yaml.safe_load(workspace_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return False
             data["cwd"] = new_path
             workspace_file.write_text(
                 yaml.dump(data, default_flow_style=False, sort_keys=False),
                 encoding="utf-8",
             )
             self.cwd = new_path
-            self.project = os.path.basename(new_path) if new_path else ""
+            normalized = os.path.normpath(new_path) if new_path else ""
+            self.project = os.path.basename(normalized) if normalized else ""
             return True
-        except OSError:
+        except (OSError, yaml.YAMLError, TypeError):
             return False
 
     def refresh_active(self) -> None:

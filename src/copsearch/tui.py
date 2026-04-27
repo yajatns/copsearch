@@ -177,7 +177,7 @@ class TUI:
             ("Status", f"● ACTIVE (PID {s.active_pid})" if s.is_active else "idle"),
             ("Summary", s.summary or "—"),
             ("Project", s.project),
-            ("Directory", s.cwd + ("  ⚠ path not found" if not s.cwd_exists else "")),
+            ("Directory", (s.cwd or "—") + ("  ⚠ path not found" if not s.cwd_exists else "")),
             ("Repository", s.repository or "—"),
             ("Branch", s.branch or "—"),
             ("Created", s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "?"),
@@ -432,18 +432,26 @@ class TUI:
 
         # Handle stale/moved/inaccessible directories
         target_dir = s.cwd
+        home_dir = os.path.expanduser("~")
+        warning: str | None = None
+
         try:
             os.chdir(target_dir)
-        except FileNotFoundError:
-            print(f"\n\033[1;33m⚠ Directory no longer exists: {target_dir}\033[0m")
-            print("  Resuming from home directory instead.\n")
-            target_dir = os.path.expanduser("~")
-            os.chdir(target_dir)
+        except (FileNotFoundError, NotADirectoryError):
+            warning = f"\n\033[1;33m⚠ Directory no longer exists: {target_dir}\033[0m"
+            target_dir = home_dir
         except PermissionError:
-            print(f"\n\033[1;33m⚠ Permission denied: {target_dir}\033[0m")
-            print("  Resuming from home directory instead.\n")
-            target_dir = os.path.expanduser("~")
-            os.chdir(target_dir)
+            warning = f"\n\033[1;33m⚠ Permission denied: {target_dir}\033[0m"
+            target_dir = home_dir
+        except OSError as exc:
+            warning = f"\n\033[1;33m⚠ Unable to access directory: {target_dir} ({exc})\033[0m"
+            target_dir = home_dir
+
+        if target_dir == home_dir:
+            if warning:
+                print(warning)
+                print("  Resuming from home directory instead.\n")
+            os.chdir(home_dir)
 
         print(f"\n\033[1;32m▶ Resuming session in: {target_dir}\033[0m")
         print(f"  {cmd}\n")
@@ -461,7 +469,8 @@ class TUI:
             return
         s = self.sessions[self.cursor]
         if s.cwd_exists:
-            cmd = f"cd {s.cwd} && copilot --resume {s.id}"
+            from shlex import quote
+            cmd = f"cd {quote(s.cwd)} && copilot --resume {s.id}"
         else:
             cmd = f"copilot --resume {s.id}"
         try:
