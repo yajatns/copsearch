@@ -430,17 +430,26 @@ class TUI:
         curses.endwin()
         cmd = f"copilot --resume {s.id}"
 
-        # Handle stale/moved directories
+        # Handle stale/moved/inaccessible directories
         target_dir = s.cwd
-        if not os.path.isdir(target_dir):
+        try:
+            os.chdir(target_dir)
+        except FileNotFoundError:
             print(f"\n\033[1;33m⚠ Directory no longer exists: {target_dir}\033[0m")
             print("  Resuming from home directory instead.\n")
             target_dir = os.path.expanduser("~")
+            os.chdir(target_dir)
+        except PermissionError:
+            print(f"\n\033[1;33m⚠ Permission denied: {target_dir}\033[0m")
+            print("  Resuming from home directory instead.\n")
+            target_dir = os.path.expanduser("~")
+            os.chdir(target_dir)
 
         print(f"\n\033[1;32m▶ Resuming session in: {target_dir}\033[0m")
         print(f"  {cmd}\n")
-        os.chdir(target_dir)
         if sys.platform == "win32":
+            # On Windows, os.execlp doesn't replace the process properly —
+            # use subprocess to avoid breaking session resume.
             import subprocess as _sp
 
             raise SystemExit(_sp.call(["copilot", "--resume", s.id]))
@@ -451,7 +460,10 @@ class TUI:
         if not self.sessions:
             return
         s = self.sessions[self.cursor]
-        cmd = f"cd {s.cwd} && copilot --resume {s.id}"
+        if s.cwd_exists:
+            cmd = f"cd {s.cwd} && copilot --resume {s.id}"
+        else:
+            cmd = f"copilot --resume {s.id}"
         try:
             if sys.platform == "win32":
                 subprocess.run(
