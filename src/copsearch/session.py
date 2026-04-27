@@ -177,6 +177,32 @@ class Session:
         except OSError:
             return False
 
+    @property
+    def cwd_exists(self) -> bool:
+        """Check if the session's working directory still exists."""
+        return bool(self.cwd) and os.path.isdir(self.cwd)
+
+    def update_cwd(self, new_path: str) -> bool:
+        """Update the session's cwd in workspace.yaml. Returns True on success."""
+        workspace_file = self.session_dir / "workspace.yaml"
+        if not workspace_file.exists():
+            return False
+        try:
+            data = yaml.safe_load(workspace_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return False
+            data["cwd"] = new_path
+            workspace_file.write_text(
+                yaml.dump(data, default_flow_style=False, sort_keys=False),
+                encoding="utf-8",
+            )
+            self.cwd = new_path
+            normalized = os.path.normpath(new_path) if new_path else ""
+            self.project = os.path.basename(normalized) if normalized else ""
+            return True
+        except (OSError, yaml.YAMLError, TypeError):
+            return False
+
     def refresh_active(self) -> None:
         """Re-check active status from on-disk lock files."""
         self.is_active = False

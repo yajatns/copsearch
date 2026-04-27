@@ -177,7 +177,7 @@ class TUI:
             ("Status", f"● ACTIVE (PID {s.active_pid})" if s.is_active else "idle"),
             ("Summary", s.summary or "—"),
             ("Project", s.project),
-            ("Directory", s.cwd),
+            ("Directory", (s.cwd or "—") + ("  ⚠ path not found" if not s.cwd_exists else "")),
             ("Repository", s.repository or "—"),
             ("Branch", s.branch or "—"),
             ("Created", s.created_at.strftime("%Y-%m-%d %H:%M") if s.created_at else "?"),
@@ -207,7 +207,8 @@ class TUI:
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
         lines.append(("", 0))
         lines.append(
-            ("  Press Esc/q: back  Enter/r: resume  y: copy  d: delete", curses.A_DIM)
+            ("  Press Esc/q: back  Enter/r: resume  y: copy  d: delete  p: change path",
+             curses.A_DIM)
         )
 
         visible = h - 1
@@ -343,11 +344,13 @@ class TUI:
                 self.message = "Cannot delete an active session"
             else:
                 self.mode = "confirm_delete"
+        elif key == ord("p"):
+            self._start_input("New path", "path")
         return False
 
     def _handle_input(self, key: int) -> None:
         if key == 27:  # Esc
-            self.mode = "list"
+            self.mode = "list" if self.input_target != "path" else "detail"
         elif key in (curses.KEY_ENTER, 10, 13):
             if self.input_target == "search":
                 self.filter_text = self.input_buffer
@@ -357,6 +360,20 @@ class TUI:
                 self.filter_branch = self.input_buffer
             elif self.input_target == "since":
                 self.filter_since = self.input_buffer
+            elif self.input_target == "path":
+                new_path = os.path.expanduser(self.input_buffer.strip())
+                if not new_path:
+                    self.message = "Path cannot be empty"
+                elif not os.path.isdir(new_path):
+                    self.message = f"Directory not found: {new_path}"
+                else:
+                    s = self.sessions[self.cursor]
+                    if s.update_cwd(new_path):
+                        self.message = f"Path updated to: {new_path}"
+                    else:
+                        self.message = "Failed to update workspace.yaml"
+                self.mode = "detail"
+                return
             self._apply_filters()
             self.mode = "list"
             self.message = f"Filter applied: {len(self.sessions)} results"
@@ -377,7 +394,10 @@ class TUI:
             "branch": self.filter_branch,
             "since": self.filter_since,
         }
-        self.input_buffer = existing.get(target, "")
+        if target == "path" and self.sessions:
+            self.input_buffer = self.sessions[self.cursor].cwd
+        else:
+            self.input_buffer = existing.get(target, "")
 
     def _apply_filters(self) -> None:
         self.sessions = filter_sessions(
@@ -409,11 +429,35 @@ class TUI:
         s = self.sessions[self.cursor]
         curses.endwin()
         cmd = f"copilot --resume {s.id}"
-        print(f"\n\033[1;32m▶ Resuming session in: {s.cwd}\033[0m")
+
+        # Handle stale/moved/inaccessible directories
+        target_dir = s.cwd
+        home_dir = os.path.expanduser("~")
+        warning: str | None = None
+
+        try:
+            os.chdir(target_dir)
+        except (FileNotFoundError, NotADirectoryError):
+            warning = f"\n\033[1;33m⚠ Directory no longer exists: {target_dir}\033[0m"
+            target_dir = home_dir
+        except PermissionError:
+            warning = f"\n\033[1;33m⚠ Permission denied: {target_dir}\033[0m"
+            target_dir = home_dir
+        except OSError as exc:
+            warning = f"\n\033[1;33m⚠ Unable to access directory: {target_dir} ({exc})\033[0m"
+            target_dir = home_dir
+
+        if target_dir == home_dir:
+            if warning:
+                print(warning)
+                print("  Resuming from home directory instead.\n")
+            os.chdir(home_dir)
+
+        print(f"\n\033[1;32m▶ Resuming session in: {target_dir}\033[0m")
         print(f"  {cmd}\n")
-        os.chdir(s.cwd)
         if sys.platform == "win32":
-            # On Windows, execlp doesn't replace the process — use subprocess
+            # On Windows, os.execlp doesn't replace the process properly —
+            # use subprocess to avoid breaking session resume.
             import subprocess as _sp
 
             raise SystemExit(_sp.call(["copilot", "--resume", s.id]))
@@ -424,7 +468,11 @@ class TUI:
         if not self.sessions:
             return
         s = self.sessions[self.cursor]
-        cmd = f"cd {s.cwd} && copilot --resume {s.id}"
+        if s.cwd_exists:
+            from shlex import quote
+            cmd = f"cd {quote(s.cwd)} && copilot --resume {s.id}"
+        else:
+            cmd = f"copilot --resume {s.id}"
         try:
             if sys.platform == "win32":
                 subprocess.run(

@@ -235,3 +235,39 @@ def test_delete_active_session_still_works(tmp_path: Path):
     assert s.is_active is True
     assert s.delete() is True
     assert not d.exists()
+
+
+def test_cwd_exists_valid(tmp_path: Path):
+    """cwd_exists returns True when directory exists."""
+    _make_session_dir(tmp_path, "cwd-001", cwd=str(tmp_path))
+    sessions = load_sessions(tmp_path)
+    s = [x for x in sessions if x.id == "cwd-001"][0]
+    assert s.cwd_exists is True
+
+
+def test_cwd_exists_stale(tmp_path: Path):
+    """cwd_exists returns False when directory is gone."""
+    fake_dir = str(tmp_path / "nonexistent" / "path")
+    _make_session_dir(tmp_path, "stale-001", cwd=fake_dir)
+    sessions = load_sessions(tmp_path)
+    s = [x for x in sessions if x.id == "stale-001"][0]
+    assert s.cwd_exists is False
+
+
+def test_update_cwd(tmp_path: Path):
+    """update_cwd rewrites workspace.yaml and updates in-memory fields."""
+    old_dir = str(tmp_path / "old")
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    _make_session_dir(tmp_path, "update-001", cwd=old_dir)
+
+    sessions = load_sessions(tmp_path)
+    s = [x for x in sessions if x.id == "update-001"][0]
+    assert s.cwd == old_dir
+    assert s.update_cwd(str(new_dir)) is True
+    assert s.cwd == str(new_dir)
+    assert s.project == "new"
+
+    # Verify it persisted to disk
+    ws = yaml.safe_load((tmp_path / "update-001" / "workspace.yaml").read_text())
+    assert ws["cwd"] == str(new_dir)
