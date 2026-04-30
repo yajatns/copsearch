@@ -209,7 +209,16 @@ def _cmd_view(argv: list[str]) -> None:
         "--no-system", action="store_true", help="Hide session-start/skill/shutdown markers"
     )
     parser.add_argument("--plain", action="store_true", help="Disable ANSI colors")
-    parser.add_argument("--no-pager", action="store_true", help="Don't pipe to $PAGER")
+    parser.add_argument(
+        "--no-pager",
+        action="store_true",
+        help="Skip the interactive viewer and dump rendered text to stdout",
+    )
+    parser.add_argument(
+        "--less",
+        action="store_true",
+        help="Use $PAGER (less) instead of the built-in interactive viewer",
+    )
     parser.add_argument(
         "--no-cache", action="store_true", help="Force re-parse, don't read or write the cache"
     )
@@ -244,7 +253,14 @@ def _cmd_view(argv: list[str]) -> None:
             print(line)
         return
 
-    _print_via_pager(iter_lines(ns, opts))
+    if args.less:
+        _print_via_pager(iter_lines(ns, opts))
+        return
+
+    # Default: interactive curses viewer with persistent help bar.
+    from copsearch.view_tui import view_in_curses
+
+    view_in_curses(ns, opts)
 
 
 def _print_via_pager(lines) -> None:

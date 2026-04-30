@@ -158,7 +158,7 @@ assistant replies, every tool call with arguments and results — either as
 ANSI text in your terminal or as a self-contained HTML file.
 
 ```bash
-# Render in the terminal (auto-pages via $PAGER)
+# Open the interactive viewer (curses, persistent help bar at the bottom)
 copsearch view 884bb
 
 # Render as a self-contained HTML file
@@ -173,7 +173,27 @@ copsearch view 884bb --max-output 30  # cap each tool result at 30 lines
 copsearch view 884bb --turn 5       # only render user turn 5 and its assistant response
 copsearch view 884bb --grep error   # filter to turns matching a pattern
 copsearch view 884bb --plain        # disable ANSI colors (also: NO_COLOR=1)
+copsearch view 884bb --less         # use $PAGER (less) instead of the curses viewer
+copsearch view 884bb --no-pager     # dump rendered text straight to stdout (for piping)
 ```
+
+### Viewer keybindings
+
+The interactive viewer shows a persistent help bar at the bottom. Inside it:
+
+| Key | Action |
+|---|---|
+| `j` / `↓` | Scroll one line down |
+| `k` / `↑` | Scroll one line up |
+| `space` / `PgDn` | Half-page down |
+| `b` / `PgUp` | Half-page up |
+| `g` / `G` | Jump to top / bottom |
+| `n` / `N` | Jump to the next / previous user or assistant turn |
+| `t` | Cycle tool detail (brief → full → none) — re-renders inline |
+| `s` | Toggle session-start / skill / shutdown markers |
+| `/` | Search forward (Enter to confirm, Esc to cancel) |
+| `?` | Search backward |
+| `q` / `Esc` | Quit |
 
 The HTML is a single self-contained file (no external assets, no network) so
 it's safe to email, attach to a PR, or open from anywhere. Each tool-call
