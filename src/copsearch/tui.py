@@ -207,7 +207,8 @@ class TUI:
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
         lines.append(("", 0))
         lines.append(
-            ("  Press Esc/q: back  Enter/r: resume  y: copy  d: delete  p: change path",
+            ("  Press Esc/q: back  Enter/r: resume  v: view  h: html  "
+             "y: copy  d: delete  p: change path",
              curses.A_DIM)
         )
 
@@ -346,6 +347,10 @@ class TUI:
                 self.mode = "confirm_delete"
         elif key == ord("p"):
             self._start_input("New path", "path")
+        elif key == ord("v"):
+            self._view_session_cli()
+        elif key == ord("h"):
+            self._render_session_html()
         return False
 
     def _handle_input(self, key: int) -> None:
@@ -463,6 +468,54 @@ class TUI:
             raise SystemExit(_sp.call(["copilot", "--resume", s.id]))
         else:
             os.execlp("copilot", "copilot", "--resume", s.id)
+
+    def _view_session_cli(self) -> None:
+        """Drop out of curses, run ``copsearch view <id>``, then return."""
+        if not self.sessions:
+            return
+        s = self.sessions[self.cursor]
+        # Tear down curses while the pager is active so it can repaint normally.
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            subprocess.run(["copsearch", "view", s.id], check=False)
+        except (FileNotFoundError, OSError) as exc:
+            # Silently fall back; the message is shown after we re-enter curses.
+            self.message = f"Failed to launch viewer: {exc}"
+        finally:
+            curses.reset_prog_mode()
+            self.scr.refresh()
+
+    def _render_session_html(self) -> None:
+        """Run ``copsearch render <id>`` in the background."""
+        if not self.sessions:
+            return
+        s = self.sessions[self.cursor]
+        try:
+            result = subprocess.run(
+                ["copsearch", "render", s.id, "--no-open"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            stdout = (result.stdout or "").strip().splitlines()
+            path = stdout[-1].replace("Wrote ", "") if stdout else ""
+            if result.returncode != 0:
+                self.message = f"render failed: {(result.stderr or '').strip()[:80]}"
+                return
+            # Open it.
+            if path:
+                if sys.platform == "darwin":
+                    subprocess.Popen(["open", path])
+                elif sys.platform == "win32":
+                    os.startfile(path)  # type: ignore[attr-defined]
+                else:
+                    subprocess.Popen(["xdg-open", path])
+                self.message = f"Opened HTML: {os.path.basename(path)}"
+            else:
+                self.message = "Rendered HTML (no output path)"
+        except (FileNotFoundError, OSError) as exc:
+            self.message = f"render failed: {exc}"
 
     def _copy_resume_cmd(self) -> None:
         if not self.sessions:
