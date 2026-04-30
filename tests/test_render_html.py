@@ -139,6 +139,50 @@ def test_theme_toggle_does_not_depend_on_unset_attribute():
     assert "data-resolved" not in html
 
 
+def test_mutation_prefixes_not_in_temporal_dead_zone():
+    """Regression: ``const MUTATION_PREFIXES`` was declared after the rendering
+    loop ran, so any session with an edit/create tool that produced a diff
+    would crash with ``ReferenceError: Cannot access 'MUTATION_PREFIXES' before
+    initialization``. The fix inlines the prefix list inside isMutationSummary.
+
+    Lock that in: if anyone ever pulls the array back out as a top-level
+    const, the test catches it.
+    """
+    html = render_html(_ns())
+    assert "const MUTATION_PREFIXES" not in html
+    # The function should still exist — sanity check on the renderer JS.
+    assert "function isMutationSummary" in html
+
+
+def test_render_with_edit_tool_carries_diff_data():
+    """Sessions with edits used to lose every assistant turn after the first
+    edit because of the TDZ bug. Verify the data is still present and the
+    HTML is well-formed.
+    """
+    edit_tc = ToolCall(
+        tool_call_id="t",
+        name="edit",
+        arguments={"path": "f.py"},
+        has_result=True,
+        success=True,
+        result_content="File f.py updated.",
+        result_detailed="diff --git a/f.py b/f.py\n@@ -1 +1 @@\n-old\n+new",
+    )
+    ns = _ns(
+        Turn(kind="user", user_text="please change f.py"),
+        Turn(kind="assistant", assistant_text="here you go", tool_calls=[edit_tc]),
+        Turn(kind="user", user_text="thanks"),
+        Turn(kind="assistant", assistant_text="you're welcome"),
+    )
+    html = render_html(ns)
+    data = _extract_payload(html)
+    # All four turns survive serialization with their text intact.
+    assert len(data["turns"]) == 4
+    assistant_texts = [t["assistant_text"] for t in data["turns"] if t["kind"] == "assistant"]
+    assert "here you go" in assistant_texts
+    assert "you're welcome" in assistant_texts
+
+
 def test_tool_call_diff_payload_preserved():
     tc = ToolCall(
         tool_call_id="t",

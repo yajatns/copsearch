@@ -1275,12 +1275,18 @@ html[data-theme="light"] .theme-toggle .moon { display: none;  }
     return wrap;
   }
 
-  const MUTATION_PREFIXES =
-    ["File ","Created file ","Created ","Wrote ","Modified ","Updated ","Edited ","Replaced "];
+  // NOTE: keep the prefix list inline. Hoisting a `const` here would put
+  // it in the temporal dead zone when isMutationSummary is invoked from
+  // the rendering loop above (function decls hoist, `const` doesn't —
+  // and pickResultBody runs eagerly during initial render).
   function isMutationSummary(s) {
     s = (s || "").trim();
     if (!s || s.indexOf("\n") >= 0) return false;
-    for (const p of MUTATION_PREFIXES) if (s.startsWith(p)) return true;
+    const prefixes = [
+      "File ", "Created file ", "Created ", "Wrote ",
+      "Modified ", "Updated ", "Edited ", "Replaced ",
+    ];
+    for (const p of prefixes) if (s.startsWith(p)) return true;
     return false;
   }
   function pickResultBody(tc) {
