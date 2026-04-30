@@ -112,6 +112,33 @@ def test_dangerous_html_in_summary_is_safe():
     assert "<img" not in title_match.group(1)
 
 
+def test_title_escapes_ampersand_and_gt():
+    """`render_html` must escape & and > (not just <) so the <title> is well-formed."""
+    html = render_html(_ns(summary="A & B > C"))
+    title_match = re.search(r"<title>(.*?)</title>", html)
+    assert title_match
+    body = title_match.group(1)
+    assert "&amp;" in body
+    assert "&gt;" in body
+    # Original characters must NOT appear unescaped.
+    assert " & " not in body
+    assert " > " not in body
+
+
+def test_no_innerhtml_in_inline_script():
+    """The bootstrap script should never use innerHTML (textContent only)."""
+    html = render_html(_ns())
+    # The inlined JS lives between two <script> markers; check the whole doc.
+    assert "innerHTML" not in html
+
+
+def test_theme_toggle_does_not_depend_on_unset_attribute():
+    """Regression: CSS used to depend on data-resolved which JS never set."""
+    html = render_html(_ns())
+    # The buggy selectors all referenced data-resolved.
+    assert "data-resolved" not in html
+
+
 def test_tool_call_diff_payload_preserved():
     tc = ToolCall(
         tool_call_id="t",

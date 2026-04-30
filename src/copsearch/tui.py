@@ -494,33 +494,41 @@ class TUI:
             self.scr.refresh()
 
     def _render_session_html(self) -> None:
-        """Run ``copsearch render <id>`` in the background."""
+        """Render the highlighted session as HTML and open it in the browser.
+
+        Synchronous — we wait for ``copsearch render`` to finish so that any
+        error surfaces back into the TUI's status line. The actual browser
+        window is launched non-blocking via ``Popen``.
+        """
         if not self.sessions:
             return
         s = self.sessions[self.cursor]
+        # Decide the path here so we don't need to parse copsearch's stdout —
+        # robust against future format changes and avoids a fragile string
+        # split on "Wrote ".
+        out_path = (
+            os.path.expanduser(f"~/.copsearch/renders/{s.id}.html")
+        )
         try:
             result = subprocess.run(
-                ["copsearch", "render", s.id, "--no-open"],
+                ["copsearch", "render", s.id, "--no-open", "-o", out_path],
                 capture_output=True,
                 text=True,
                 check=False,
             )
-            stdout = (result.stdout or "").strip().splitlines()
-            path = stdout[-1].replace("Wrote ", "") if stdout else ""
             if result.returncode != 0:
                 self.message = f"render failed: {(result.stderr or '').strip()[:80]}"
                 return
-            # Open it.
-            if path:
-                if sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
-                elif sys.platform == "win32":
-                    os.startfile(path)  # type: ignore[attr-defined]
-                else:
-                    subprocess.Popen(["xdg-open", path])
-                self.message = f"Opened HTML: {os.path.basename(path)}"
+            if not os.path.exists(out_path):
+                self.message = f"render produced no file at {out_path}"
+                return
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", out_path])
+            elif sys.platform == "win32":
+                os.startfile(out_path)  # type: ignore[attr-defined]
             else:
-                self.message = "Rendered HTML (no output path)"
+                subprocess.Popen(["xdg-open", out_path])
+            self.message = f"Opened HTML: {os.path.basename(out_path)}"
         except (FileNotFoundError, OSError) as exc:
             self.message = f"render failed: {exc}"
 

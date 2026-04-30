@@ -117,6 +117,32 @@ def test_state_turn_starts_finds_user_and_assistant_headers():
     assert starts == sorted(starts)
 
 
+def test_view_in_curses_does_not_mutate_callers_opts(monkeypatch):
+    """Regression: refresh_lines used to mutate opts.color/.tools on the caller."""
+    from copsearch import view_tui
+
+    captured = {"private_color": None, "private_tools": None}
+
+    def fake_wrapper(_func, ns, opts):
+        # Mimic what _run does: mutate the (private) opts copy.
+        opts.color = False
+        opts.tools = "full"
+        captured["private_color"] = opts.color
+        captured["private_tools"] = opts.tools
+        return 0
+
+    monkeypatch.setattr(view_tui.curses, "wrapper", fake_wrapper)
+
+    caller_opts = RenderOptions(color=True, tools="brief")
+    view_tui.view_in_curses(_ns_with_turns(), caller_opts)
+    # The caller's opts must not have been touched.
+    assert caller_opts.color is True
+    assert caller_opts.tools == "brief"
+    # The private copy *was* mutated, confirming we tested the right thing.
+    assert captured["private_color"] is False
+    assert captured["private_tools"] == "full"
+
+
 def test_state_tools_mode_switch_changes_output():
     s = _State(ns=_ns_with_turns(), opts=RenderOptions(width=80))
     s.refresh_lines()

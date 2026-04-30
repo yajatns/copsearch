@@ -149,21 +149,15 @@ def normalize(raw_events: list[dict], meta: SessionMeta) -> NormalizedSession:
     Pure function — exposed for tests and callers that already have events
     loaded from somewhere other than disk.
     """
-    # First pass: index tool requests (from assistant messages) and tool
-    # results (from tool.execution_complete). We need both sides before we
-    # can attach the merged ToolCall to the right assistant turn.
-    request_index: dict[str, dict] = {}  # toolCallId -> request dict
+    # First pass: index tool execution start/complete events. We need them
+    # ahead of the second pass so we can merge results onto requests as we
+    # encounter assistant.message tool requests in order.
     result_index: dict[str, dict] = {}  # toolCallId -> tool.execution_complete event
     start_index: dict[str, dict] = {}  # toolCallId -> tool.execution_start event
 
     for ev in raw_events:
         t = ev.get("type")
-        if t == "assistant.message":
-            for tr in (ev.get("data") or {}).get("toolRequests") or []:
-                tcid = tr.get("toolCallId")
-                if tcid:
-                    request_index[tcid] = tr
-        elif t == "tool.execution_start":
+        if t == "tool.execution_start":
             tcid = (ev.get("data") or {}).get("toolCallId")
             if tcid:
                 start_index[tcid] = ev
@@ -435,20 +429,23 @@ def _assign_depths(turns: list[Turn]) -> None:
                 by_id[tc.tool_call_id] = tc
 
     cache: dict[str, int] = {}
+    max_depth = 10
 
-    def depth_of(tc: ToolCall) -> int:
-        if tc.tool_call_id in cache:
-            return cache[tc.tool_call_id]
+    def depth_of(tc: ToolCall, visiting: frozenset[str] = frozenset()) -> int:
+        tc_id = tc.tool_call_id
+        if tc_id in cache:
+            return cache[tc_id]
+        # Cycle in the parent chain (A→B→…→A): break and treat as a root.
+        if tc_id in visiting:
+            cache[tc_id] = 0
+            return 0
         if not tc.parent_tool_call_id or tc.parent_tool_call_id not in by_id:
-            cache[tc.tool_call_id] = 0
+            cache[tc_id] = 0
             return 0
         parent = by_id[tc.parent_tool_call_id]
-        # Cycle guard: cap at depth 10.
-        if parent is tc:
-            cache[tc.tool_call_id] = 0
-            return 0
-        cache[tc.tool_call_id] = min(depth_of(parent) + 1, 10)
-        return cache[tc.tool_call_id]
+        d = min(depth_of(parent, visiting | {tc_id}) + 1, max_depth)
+        cache[tc_id] = d
+        return d
 
     for tc in by_id.values():
         tc.depth = depth_of(tc)

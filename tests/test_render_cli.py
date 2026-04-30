@@ -192,6 +192,35 @@ def test_no_result_tool_glyph():
     assert "⏳" in out
 
 
+def test_no_result_tool_in_full_mode_does_not_crash():
+    """Regression: tools=full used to read tc.aborted (which doesn't exist)."""
+    tc = ToolCall(
+        tool_call_id="x", name="bash", arguments={"command": "x"}, has_result=False,
+    )
+    out = render_session(
+        _ns(Turn(kind="assistant", tool_calls=[tc])),
+        RenderOptions(color=False, tools="full", width=80),
+    )
+    assert "no result captured" in out
+
+
+def test_footer_renders_when_only_api_duration_set():
+    """Regression: footer used to be hidden when total_premium_requests was 0/None."""
+    ns = _ns()
+    ns.meta.total_api_duration_ms = 1500
+    out = render_session(ns, RenderOptions(color=False, width=80))
+    assert "API duration" in out
+    assert "1.5s" in out
+
+
+def test_footer_renders_when_premium_requests_is_zero():
+    ns = _ns()
+    ns.meta.total_premium_requests = 0
+    out = render_session(ns, RenderOptions(color=False, width=80))
+    assert "Premium requests" in out
+    assert " 0" in out
+
+
 # ── Filtering ────────────────────────────────────────────────────────────────
 
 

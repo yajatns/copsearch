@@ -215,6 +215,43 @@ def test_duration_ms_computed_from_timestamps():
 # ── Sub-agent depth ──────────────────────────────────────────────────────────
 
 
+def test_sub_agent_depth_handles_cycle_without_recursion_error():
+    """A cycle in parentToolCallId chains must not crash the normalizer."""
+    # A → B → A: a malformed log we shouldn't trust but shouldn't crash on either.
+    events = [
+        _ev("assistant.turn_start", {"turnId": "0", "interactionId": "i1"}),
+        _ev(
+            "assistant.message",
+            {
+                "toolRequests": [
+                    {"toolCallId": "A", "name": "task", "arguments": {}},
+                    {"toolCallId": "B", "name": "bash", "arguments": {}},
+                ]
+            },
+        ),
+        _ev(
+            "tool.execution_complete",
+            {
+                "toolCallId": "A", "success": True,
+                "result": {"content": ""}, "parentToolCallId": "B",
+            },
+        ),
+        _ev(
+            "tool.execution_complete",
+            {
+                "toolCallId": "B", "success": True,
+                "result": {"content": ""}, "parentToolCallId": "A",
+            },
+        ),
+    ]
+    ns = normalize(events, _meta())  # must not raise RecursionError
+    calls = {tc.tool_call_id: tc for tc in ns.turns[0].tool_calls}
+    # Both calls get *some* finite depth; we don't care which is the "root".
+    assert calls["A"].depth >= 0
+    assert calls["B"].depth >= 0
+    assert calls["A"].depth <= 10 and calls["B"].depth <= 10
+
+
 def test_sub_agent_depth_assigned():
     """Tool calls with parentToolCallId pointing at another call get depth>0."""
     events = [

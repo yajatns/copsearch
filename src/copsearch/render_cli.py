@@ -163,7 +163,13 @@ def _header(ns: NormalizedSession, ansi: dict, width: int) -> Iterator[str]:
 
 def _footer(ns: NormalizedSession, ansi: dict, width: int) -> Iterator[str]:
     m = ns.meta
-    if not (m.total_premium_requests or m.code_changes or m.model_metrics):
+    has_content = (
+        m.total_premium_requests is not None
+        or m.total_api_duration_ms is not None
+        or bool(m.code_changes)
+        or bool(m.model_metrics)
+    )
+    if not has_content:
         return
     yield f"{ansi['DIM']}{'─' * width}{ansi['RESET']}"
     yield f"{ansi['BOLD']}  Session totals{ansi['RESET']}"
@@ -292,7 +298,7 @@ def _render_tool_call(tc: ToolCall, ansi: dict, width: int, opts: RenderOptions)
             yield f"{indent}  {ansi['DIM']}── result ──{ansi['RESET']}"
             for line in _render_result_body(body, tc, indent + "  ", ansi, opts):
                 yield line
-    elif not tc.aborted:
+    else:
         yield f"{indent}  {ansi['DIM']}(no result captured){ansi['RESET']}"
 
 

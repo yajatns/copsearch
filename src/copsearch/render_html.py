@@ -25,6 +25,7 @@ Design principles applied (after ui-ux-pro-max skill):
 
 from __future__ import annotations
 
+import html
 import json
 
 from copsearch.normalize import NormalizedSession, to_dict
@@ -36,7 +37,9 @@ def render_html(ns: NormalizedSession) -> str:
     # ``</script>`` inside the payload would terminate our script tag early —
     # split the closing slash so the byte sequence never appears literally.
     safe_payload = payload.replace("</", "<\\/")
-    title = (ns.meta.summary or ns.meta.session_id or "Copilot session").replace("<", "&lt;")
+    raw_title = ns.meta.summary or ns.meta.session_id or "Copilot session"
+    # Escape &, <, > so user-controlled summaries can't break the <title>.
+    title = html.escape(raw_title, quote=False)
     return _TEMPLATE.replace("__TITLE__", title).replace("__PAYLOAD__", safe_payload)
 
 
@@ -644,14 +647,21 @@ main {
   color: var(--text-secondary);
 }
 
-/* Theme toggle */
+/* Theme toggle. The icon shown reflects the *current effective* theme:
+   in auto mode we mirror the OS preference via prefers-color-scheme,
+   so a media query picks the right icon for us. Manual overrides via
+   [data-theme="light"|"dark"] win because they're more specific. */
 .theme-toggle .icon { width: 16px; height: 16px; }
-html[data-theme="dark"]  .theme-toggle .moon,
-html[data-theme="auto"]:not([data-resolved="dark"]) .theme-toggle .sun { display: block; }
-html[data-theme="dark"]  .theme-toggle .sun,
-html[data-theme="auto"]:not([data-resolved="dark"]) .theme-toggle .moon,
-html[data-theme="light"] .theme-toggle .moon { display: none; }
-html[data-theme="light"] .theme-toggle .sun { display: block; }
+.theme-toggle .sun  { display: block; }
+.theme-toggle .moon { display: none;  }
+@media (prefers-color-scheme: dark) {
+  html[data-theme="auto"] .theme-toggle .sun  { display: none;  }
+  html[data-theme="auto"] .theme-toggle .moon { display: block; }
+}
+html[data-theme="dark"]  .theme-toggle .sun  { display: none;  }
+html[data-theme="dark"]  .theme-toggle .moon { display: block; }
+html[data-theme="light"] .theme-toggle .sun  { display: block; }
+html[data-theme="light"] .theme-toggle .moon { display: none;  }
 
 /* Empty state */
 .empty {
@@ -1101,22 +1111,23 @@ html[data-theme="light"] .theme-toggle .sun { display: block; }
     const p = document.createElement("div"); p.className = "text"; p.textContent = s; return p;
   }
 
+  function labelledLine(label, valueText) {
+    const div = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = label;
+    div.appendChild(strong);
+    div.appendChild(document.createTextNode(" "));
+    const code = document.createElement("code");
+    code.textContent = valueText || "";
+    div.appendChild(code);
+    return div;
+  }
   function renderSystemBody(t) {
     const wrap = document.createElement("div"); wrap.className = "system-body";
     const d = t.system_data || {};
     if (t.system_kind === "skill_invoked") {
-      const name = document.createElement("div");
-      name.innerHTML = "<strong>Skill:</strong> ";
-      const code = document.createElement("code"); code.textContent = d.name || "";
-      name.appendChild(code);
-      wrap.appendChild(name);
-      if (d.path) {
-        const path = document.createElement("div");
-        path.innerHTML = "<strong>Path:</strong> ";
-        const code2 = document.createElement("code"); code2.textContent = d.path;
-        path.appendChild(code2);
-        wrap.appendChild(path);
-      }
+      wrap.appendChild(labelledLine("Skill:", d.name));
+      if (d.path) wrap.appendChild(labelledLine("Path:", d.path));
     } else if (t.system_kind === "session_shutdown") {
       const cc = d.codeChanges || {};
       const txt = document.createElement("div");
@@ -1135,7 +1146,12 @@ html[data-theme="light"] .theme-toggle .sun { display: block; }
     const wrap = document.createElement("div");
     wrap.className = "tool";
     wrap.dataset.depth = String(Math.min(tc.depth || 0, 3));
-    wrap.dataset.success = String(tc.success);
+    // Explicit "true" | "false" | "null" — keep the value stable for the
+    // CSS selector ``.tool[data-success="..."]`` regardless of how
+    // ``tc.success`` is represented in JSON (true/false/null/undefined).
+    wrap.dataset.success =
+      tc.success === true ? "true" :
+      tc.success === false ? "false" : "null";
 
     const head = document.createElement("button");
     head.type = "button";

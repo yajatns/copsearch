@@ -39,6 +39,7 @@ Keybindings:
 
 from __future__ import annotations
 
+import copy
 import curses
 import locale
 import re
@@ -123,11 +124,18 @@ def view_in_curses(ns: NormalizedSession, opts: RenderOptions) -> int:
 
     Falls back to plain stdout printing if curses can't initialize (e.g. on
     a non-tty or in CI).
+
+    The caller's ``opts`` is never mutated — we work on a private copy so
+    that toggling tools/system inside the viewer doesn't bleed back into
+    the surrounding CLI invocation.
     """
     locale.setlocale(locale.LC_ALL, "")
+    private_opts = copy.copy(opts)
     try:
-        return curses.wrapper(_run, ns, opts) or 0
+        return curses.wrapper(_run, ns, private_opts) or 0
     except curses.error:
+        # If curses couldn't init we render with the *caller's* opts so the
+        # user gets whatever color/tool settings they asked for on the CLI.
         for line in iter_lines(ns, opts):
             print(line)
         return 0

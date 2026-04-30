@@ -266,14 +266,24 @@ def _cmd_view(argv: list[str]) -> None:
 def _print_via_pager(lines) -> None:
     """Pipe lines into ``$PAGER`` (or ``less -R``). Falls back to direct print."""
     pager = os.environ.get("PAGER") or "less"
-    pager_args: list[str] = []
-    if pager == "less":
-        # -R: pass ANSI through. -F: quit if output fits one screen. -X: don't init/deinit.
-        # +g: start at top.
-        pager_args = ["-RFX"]
+    # Recognise ``less`` even when invoked via an absolute path or with
+    # pre-armed flags (e.g. ``PAGER='/usr/bin/less -F'``).
+    pager_argv = pager.split()
+    pager_basename = os.path.basename(pager_argv[0]) if pager_argv else ""
+    if pager_basename == "less":
+        # -R: pass ANSI through. -F: quit if output fits one screen.
+        # -X: don't init/deinit. -K: handle Ctrl-C cleanly.
+        # Don't add flags the user already set themselves.
+        existing_short = "".join(
+            a for a in pager_argv[1:]
+            if a.startswith("-") and not a.startswith("--")
+        )
+        for flag in ("-R", "-F", "-X"):
+            if flag[1] not in existing_short:
+                pager_argv.append(flag)
     try:
         proc = subprocess.Popen(
-            [pager, *pager_args],
+            pager_argv,
             stdin=subprocess.PIPE,
             text=True,
             encoding="utf-8",
@@ -282,14 +292,23 @@ def _print_via_pager(lines) -> None:
         for line in lines:
             print(line)
         return
+    # try/finally so an exception in ``lines`` (the generator) doesn't leave
+    # the pager as a zombie. We must always close stdin and wait().
     try:
         assert proc.stdin is not None
         for line in lines:
-            proc.stdin.write(line + "\n")
-        proc.stdin.close()
-    except (BrokenPipeError, OSError):
-        pass  # User pressed q before we finished writing — that's fine.
-    proc.wait()
+            try:
+                proc.stdin.write(line + "\n")
+            except (BrokenPipeError, OSError):
+                # User pressed q before we finished writing — stop sending.
+                break
+    finally:
+        try:
+            if proc.stdin is not None:
+                proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+        proc.wait()
 
 
 # ── render subcommand (HTML) ─────────────────────────────────────────────────
@@ -336,7 +355,12 @@ def _cmd_render(argv: list[str]) -> None:
     else:
         out_path = Path.home() / ".copsearch" / "renders" / f"{session.id}.html"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(html, encoding="utf-8")
+    # Atomic write: a render-in-progress shouldn't leave a half-written
+    # file on disk. The browser may be holding the previous version open;
+    # we want either the old or the new, never a partial.
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp_path.write_text(html, encoding="utf-8")
+    os.replace(tmp_path, out_path)
     print(f"Wrote {out_path}")
 
     if not args.no_open:
@@ -474,9 +498,13 @@ def _cmd_cache(argv: list[str]) -> None:
             print(f"Removed {removed} orphan{'' if removed == 1 else 's'}.")
             return
         if not args.yes:
-            resp = input(
-                f"Wipe entire cache at {cache_mod.DEFAULT_CACHE_DIR}? [y/N] "
-            ).strip().lower()
+            try:
+                resp = input(
+                    f"Wipe entire cache at {cache_mod.DEFAULT_CACHE_DIR}? [y/N] "
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print("\nCancelled.")
+                return
             if resp not in ("y", "yes"):
                 print("Cancelled.")
                 return
