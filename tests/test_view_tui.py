@@ -117,6 +117,31 @@ def test_state_turn_starts_finds_user_and_assistant_headers():
     assert starts == sorted(starts)
 
 
+def test_view_in_curses_honours_caller_tools_and_show_system(monkeypatch):
+    """``copsearch view --tools full --no-system`` was being ignored by the
+    curses viewer because _State always defaulted to brief + system shown."""
+    from copsearch import view_tui
+
+    captured: dict = {}
+
+    def fake_wrapper(_func, ns, opts):
+        # Drive the same init path as _run does.
+        state = view_tui._State(ns=ns, opts=opts)
+        state.tools_mode = opts.tools
+        state.show_system = opts.show_system_events
+        state.refresh_lines()
+        captured["tools_mode"] = state.tools_mode
+        captured["show_system"] = state.show_system
+        return 0
+
+    monkeypatch.setattr(view_tui.curses, "wrapper", fake_wrapper)
+
+    caller_opts = RenderOptions(color=True, tools="full", show_system_events=False)
+    view_tui.view_in_curses(_ns_with_turns(), caller_opts)
+    assert captured["tools_mode"] == "full"
+    assert captured["show_system"] is False
+
+
 def test_view_in_curses_does_not_mutate_callers_opts(monkeypatch):
     """Regression: refresh_lines used to mutate opts.color/.tools on the caller."""
     from copsearch import view_tui

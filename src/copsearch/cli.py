@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 import textwrap
@@ -266,9 +267,13 @@ def _cmd_view(argv: list[str]) -> None:
 def _print_via_pager(lines) -> None:
     """Pipe lines into ``$PAGER`` (or ``less -R``). Falls back to direct print."""
     pager = os.environ.get("PAGER") or "less"
-    # Recognise ``less`` even when invoked via an absolute path or with
-    # pre-armed flags (e.g. ``PAGER='/usr/bin/less -F'``).
-    pager_argv = pager.split()
+    # Use shell-style splitting so quoted args and paths-with-spaces survive,
+    # e.g. ``PAGER='bat --paging=always --style="numbers"'``.
+    try:
+        pager_argv = shlex.split(pager)
+    except ValueError:
+        # Malformed quoting — fall back to naive split.
+        pager_argv = pager.split()
     pager_basename = os.path.basename(pager_argv[0]) if pager_argv else ""
     if pager_basename == "less":
         # -R: pass ANSI through. -F: quit if output fits one screen.
@@ -489,7 +494,8 @@ def _cmd_cache(argv: list[str]) -> None:
 
     if args.action == "clear":
         if args.id:
-            removed = cache_mod.clear(session_id=args.id)
+            full_id = _resolve_cached_id(args.id, cache_mod)
+            removed = cache_mod.clear(session_id=full_id)
             print(f"Removed {removed} cache entr{'y' if removed == 1 else 'ies'}.")
             return
         if args.orphans:
@@ -510,6 +516,34 @@ def _cmd_cache(argv: list[str]) -> None:
                 return
         removed = cache_mod.clear()
         print(f"Removed {removed} cache entr{'y' if removed == 1 else 'ies'}.")
+
+
+def _resolve_cached_id(id_prefix: str, cache_mod) -> str:
+    """Resolve ``id_prefix`` to a full session ID against existing cache entries.
+
+    Mirrors the prefix-matching behaviour the rest of the CLI offers (``--id``,
+    ``view``, ``render``) so ``copsearch cache clear --id 884bb`` works.
+    Returns the original prefix if nothing in the cache directory matches —
+    the underlying ``clear()`` will then no-op (no cache entry removed).
+    """
+    base = cache_mod.DEFAULT_CACHE_DIR
+    if not base.exists():
+        return id_prefix
+    matches = [
+        d.name for d in base.iterdir()
+        if d.is_dir() and d.name.startswith(id_prefix)
+    ]
+    if not matches:
+        return id_prefix
+    if len(matches) > 1:
+        print(
+            f"Ambiguous prefix '{id_prefix}' — matches {len(matches)} cached sessions:",
+            file=sys.stderr,
+        )
+        for m in matches[:10]:
+            print(f"  {m}", file=sys.stderr)
+        sys.exit(1)
+    return matches[0]
 
 
 def _humanize_bytes(n: int) -> str:

@@ -243,6 +243,49 @@ def test_clear_all(tmp_path: Path):
     assert cache_mod.stats(cache_dir=cache_dir).entries == 0
 
 
+def test_resolve_cached_id_accepts_prefix(tmp_path: Path, monkeypatch):
+    """`copsearch cache clear --id 884bb` should work, not require the full UUID."""
+    import copsearch.cache as cache_mod_real
+    from copsearch.cli import _resolve_cached_id
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "884bb6a6-5491-470f-9af7-5e866ff38afc").mkdir()
+    (cache_dir / "deadbeef-1234").mkdir()
+
+    monkeypatch.setattr(cache_mod_real, "DEFAULT_CACHE_DIR", cache_dir)
+    full = _resolve_cached_id("884bb", cache_mod_real)
+    assert full == "884bb6a6-5491-470f-9af7-5e866ff38afc"
+
+
+def test_resolve_cached_id_returns_input_when_no_match(tmp_path: Path, monkeypatch):
+    import copsearch.cache as cache_mod_real
+    from copsearch.cli import _resolve_cached_id
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    monkeypatch.setattr(cache_mod_real, "DEFAULT_CACHE_DIR", cache_dir)
+    # No matching prefix → return input verbatim so clear() no-ops cleanly.
+    assert _resolve_cached_id("nope", cache_mod_real) == "nope"
+
+
+def test_resolve_cached_id_errors_on_ambiguous(tmp_path: Path, monkeypatch, capsys):
+    import copsearch.cache as cache_mod_real
+    from copsearch.cli import _resolve_cached_id
+
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    (cache_dir / "abc-1").mkdir()
+    (cache_dir / "abc-2").mkdir()
+    monkeypatch.setattr(cache_mod_real, "DEFAULT_CACHE_DIR", cache_dir)
+    try:
+        _resolve_cached_id("abc", cache_mod_real)
+    except SystemExit as e:
+        assert e.code == 1
+    err = capsys.readouterr().err
+    assert "Ambiguous prefix" in err
+
+
 def test_load_returns_none_for_older_schema_version(tmp_path: Path):
     """Caches written by an older schema must be ignored, forcing re-parse."""
     cache_dir = tmp_path / "cache"

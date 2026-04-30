@@ -154,6 +154,19 @@ def test_mutation_prefixes_not_in_temporal_dead_zone():
     assert "function isMutationSummary" in html
 
 
+def test_status_icon_logic_is_tristate():
+    """The status icon should match wrap.dataset.success: true→check, false→x,
+    null/unknown→clock (not lie about the result with an x)."""
+    html = render_html(_ns())
+    # The function body must explicitly handle all three cases.
+    js_block = re.search(r"function statusIconFor\(tc\)\s*\{(.+?)\n\s*\}", html, re.DOTALL)
+    assert js_block, "statusIconFor not found"
+    body = js_block.group(1)
+    assert 'tc.success === true' in body
+    assert 'tc.success === false' in body
+    assert "i-clock" in body  # neutral fallback
+
+
 def test_render_with_edit_tool_carries_diff_data():
     """Sessions with edits used to lose every assistant turn after the first
     edit because of the TDZ bug. Verify the data is still present and the

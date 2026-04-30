@@ -50,7 +50,7 @@ from copsearch.render_cli import RenderOptions, iter_lines
 
 HELP_BAR = (
     "j/↓ scroll · b/space page · g/G top/bot · n/N next-turn · "
-    "t tools · / search · q quit"
+    "t tools · s system · / ? search · q quit"
 )
 
 # ── Line classifiers ─────────────────────────────────────────────────────────
@@ -129,7 +129,12 @@ def view_in_curses(ns: NormalizedSession, opts: RenderOptions) -> int:
     that toggling tools/system inside the viewer doesn't bleed back into
     the surrounding CLI invocation.
     """
-    locale.setlocale(locale.LC_ALL, "")
+    # Some minimal/CI environments don't have a usable LC_ALL set; failing
+    # here would skip the curses fallback below.
+    try:
+        locale.setlocale(locale.LC_ALL, "")
+    except locale.Error:
+        pass
     private_opts = copy.copy(opts)
     try:
         return curses.wrapper(_run, ns, private_opts) or 0
@@ -145,12 +150,26 @@ def view_in_curses(ns: NormalizedSession, opts: RenderOptions) -> int:
 
 
 def _run(stdscr: curses._CursesWindow, ns: NormalizedSession, opts: RenderOptions) -> int:
-    curses.curs_set(0)
-    curses.use_default_colors()
-    _init_colors()
+    try:
+        curses.curs_set(0)
+    except curses.error:
+        pass
+    # ``use_default_colors`` and ``init_pair`` need colour support to be
+    # initialised first. Some terminals (TERM=dumb, vt220, etc.) report no
+    # colours at all — fall through to mono in that case.
+    if curses.has_colors():
+        try:
+            curses.start_color()
+            curses.use_default_colors()
+            _init_colors()
+        except curses.error:
+            pass
     stdscr.timeout(-1)
 
     state = _State(ns=ns, opts=opts)
+    # Honour what the user asked for on the CLI (--tools, --no-system).
+    state.tools_mode = opts.tools
+    state.show_system = opts.show_system_events
     state.refresh_lines()
 
     while True:

@@ -1248,8 +1248,15 @@ html[data-theme="light"] .theme-toggle .moon { display: none;  }
   }
 
   function statusIconFor(tc) {
+    // Tri-state to match the colour set on wrap.dataset.success:
+    //   true  → green check
+    //   false → red x
+    //   anything else (null/undefined from older caches) → neutral clock,
+    //   so the icon doesn't lie about a result we don't actually have.
     if (!tc.has_result) return "i-hourglass";
-    return tc.success ? "i-check" : "i-x";
+    if (tc.success === true)  return "i-check";
+    if (tc.success === false) return "i-x";
+    return "i-clock";
   }
 
   function toolIconFor(tc) {
