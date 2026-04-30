@@ -391,12 +391,33 @@ main {
 
 .turn-body { padding: 16px 20px 20px; }
 .turn.system .turn-body { padding: 0 20px 12px; }
-.turn-body .text {
+
+/* Message-text bubble. User prose and assistant prose each get a
+   tinted background so they're easy to scan past the tool-call noise.
+   Tool calls within an assistant turn keep their own neutral cards. */
+.turn-body > .text {
   white-space: pre-wrap; word-wrap: break-word;
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 15.5px;
+  line-height: 1.6;
+  padding: 14px 18px;
+  border-radius: var(--radius);
 }
-.turn-body .text + .tools { margin-top: 16px; }
+.turn.user .turn-body > .text {
+  background: var(--user-soft);
+  border-left: 3px solid var(--user-accent);
+}
+.turn.assistant .turn-body > .text {
+  background: var(--assistant-soft);
+  border-left: 3px solid var(--assistant-accent);
+}
+.turn.system .turn-body .text {
+  white-space: pre-wrap; word-wrap: break-word;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.turn-body > .text + .tools { margin-top: 16px; }
 .tools { display: flex; flex-direction: column; gap: 8px; }
 
 /* ── Tool calls ───────────────────────────────────────────────────────── */
