@@ -241,20 +241,32 @@ def _render_system(turn: Turn, ansi: dict, width: int) -> Iterator[str]:
     label_map = {
         "session_start": ("○ Session start", "GREEN"),
         "session_shutdown": ("○ Session end", "GRAY"),
-        "skill_invoked": ("◆ Skill", "YELLOW"),
+        "skill_invoked": ("◆ Skill loaded", "YELLOW"),
+        "skill_context": ("◆ Skill context", "YELLOW"),
     }
     label, color_name = label_map.get(turn.system_kind, ("○", "GRAY"))
     color = ansi.get(color_name, "")
     ts = _short_ts(turn.timestamp)
-    yield (
-        f"{ansi['DIM']}{color}{label}{ansi['RESET']}  "
-        f"{ansi['DIM']}{ts}{ansi['RESET']}"
+    name_inline = turn.system_data.get("name", "") if turn.system_kind in (
+        "skill_invoked", "skill_context"
+    ) else ""
+    head = (
+        f"{ansi['DIM']}{color}{label}{ansi['RESET']}"
+        + (f"  {ansi['CYAN']}{name_inline}{ansi['RESET']}" if name_inline else "")
+        + f"  {ansi['DIM']}{ts}{ansi['RESET']}"
     )
+    yield head
     if turn.system_kind == "skill_invoked":
-        yield f"  {ansi['DIM']}name:{ansi['RESET']} {turn.system_data.get('name', '')}"
         path = turn.system_data.get("path", "")
         if path:
             yield f"  {ansi['DIM']}path:{ansi['RESET']} {path}"
+    elif turn.system_kind == "skill_context":
+        size = turn.system_data.get("size")
+        if size:
+            yield (
+                f"  {ansi['DIM']}injected: {size:,} chars of skill content "
+                f"(suppressed){ansi['RESET']}"
+            )
     elif turn.system_kind == "session_shutdown":
         cc = turn.system_data.get("codeChanges") or {}
         if cc:

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from copsearch.normalize import (
+    SCHEMA_VERSION,
     NormalizedSession,
     SessionMeta,
     from_dict,
@@ -72,7 +73,10 @@ def is_fresh(session: Session, cache_dir: Path | None = None) -> bool:
 def load(session: Session, cache_dir: Path | None = None) -> NormalizedSession | None:
     """Return the cached :class:`NormalizedSession` if present, else None.
 
-    Does *not* check freshness — call :func:`is_fresh` first if that matters.
+    Does *not* check mtime freshness — call :func:`is_fresh` first if that
+    matters. Caches written by an older schema version are treated as a
+    miss so the caller re-parses against the current normalizer.
+
     Returns None on any read/parse error (treated as a cache miss).
     """
     cp = cache_path(session.id, cache_dir)
@@ -82,6 +86,8 @@ def load(session: Session, cache_dir: Path | None = None) -> NormalizedSession |
         with gzip.open(cp, "rt", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
+        return None
+    if int(data.get("schema_version", 0)) < SCHEMA_VERSION:
         return None
     return from_dict(data)
 

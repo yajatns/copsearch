@@ -243,6 +243,30 @@ def test_clear_all(tmp_path: Path):
     assert cache_mod.stats(cache_dir=cache_dir).entries == 0
 
 
+def test_load_returns_none_for_older_schema_version(tmp_path: Path):
+    """Caches written by an older schema must be ignored, forcing re-parse."""
+    cache_dir = tmp_path / "cache"
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    s = _make_session(sessions_dir, "stale-cache", events=_basic_events())
+
+    # Hand-write a cache with schema_version 0 (older than the live constant).
+    cp = cache_mod.cache_path(s.id, cache_dir)
+    cp.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(cp, "wt", encoding="utf-8") as f:
+        json.dump({"schema_version": 0, "meta": {"session_id": s.id}, "turns": []}, f)
+    # Bump cache mtime so is_fresh() would say "fresh" — version check must
+    # still reject it.
+    new_mtime = (sessions_dir / s.id / "events.jsonl").stat().st_mtime + 10
+    os.utime(cp, (new_mtime, new_mtime))
+
+    assert cache_mod.is_fresh(s, cache_dir) is True  # mtime says fresh
+    assert cache_mod.load(s, cache_dir) is None  # but version says no
+    # And the get() flow should re-parse and return real turns.
+    ns = cache_mod.get(s, cache_dir)
+    assert len(ns.turns) > 0
+
+
 def test_clear_nonexistent_is_safe(tmp_path: Path):
     cache_dir = tmp_path / "does-not-exist"
     assert cache_mod.clear(cache_dir=cache_dir) == 0

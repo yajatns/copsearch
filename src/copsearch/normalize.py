@@ -19,15 +19,29 @@ and consumed by both the CLI and HTML renderers.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+# v2 (2026-04-29): synthesized ``<skill-context>`` user.messages are now
+#                  collapsed into ``skill_context`` system turns instead of
+#                  appearing as multi-KB user prompts.
+SCHEMA_VERSION = 2
 
 # Event types we read but never surface to renderers as their own turn.
 _PLUMBING_EVENTS = {"hook.start", "hook.end"}
+
+# Copilot occasionally synthesizes a user.message whose content is a
+# runtime-injected wrapper rather than something the user actually typed
+# (e.g. ``<skill-context name="integration-management">...full SKILL.md...
+# </skill-context>``). We surface these as compact system turns rather
+# than dumping multi-KB blobs into the conversation as if the user wrote
+# them. Each entry: (regex on content, system_kind, name-extracting group).
+_SYNTHETIC_USER_PATTERNS = (
+    (re.compile(r'^<skill-context\s+name="([^"]+)"'), "skill_context"),
+)
 
 
 @dataclass
@@ -186,7 +200,20 @@ def normalize(raw_events: list[dict], meta: SessionMeta) -> NormalizedSession:
 
         elif t == "user.message":
             current_assistant = None
-            turns.append(Turn(kind="user", timestamp=ts, user_text=data.get("content", "")))
+            content = data.get("content", "") or ""
+            synth = _classify_synthetic_user(content)
+            if synth is not None:
+                kind, name = synth
+                turns.append(
+                    Turn(
+                        kind="system",
+                        timestamp=ts,
+                        system_kind=kind,
+                        system_data={"name": name, "size": len(content)},
+                    )
+                )
+            else:
+                turns.append(Turn(kind="user", timestamp=ts, user_text=content))
 
         elif t == "assistant.turn_start":
             current_assistant = Turn(
@@ -325,6 +352,23 @@ def from_dict(d: dict) -> NormalizedSession:
 
 
 # ── Internals ────────────────────────────────────────────────────────────────
+
+
+def _classify_synthetic_user(content: str) -> tuple[str, str] | None:
+    """Detect a runtime-synthesized ``user.message`` content.
+
+    Returns ``(system_kind, extracted_name)`` if matched, else ``None``.
+    The caller turns it into a compact system turn instead of a fake
+    user prompt so renderers don't dump KB-scale blobs into the chat.
+    """
+    if not content:
+        return None
+    for pattern, kind in _SYNTHETIC_USER_PATTERNS:
+        m = pattern.match(content)
+        if m:
+            name = m.group(1) if m.groups() else ""
+            return kind, name
+    return None
 
 
 def _iter_events(events_path: Path):

@@ -1086,7 +1086,8 @@ html[data-theme="light"] .theme-toggle .moon { display: none;  }
       }
       return "(no text)";
     }
-    if (t.system_kind === "skill_invoked") return "skill: " + ((t.system_data||{}).name || "");
+    if (t.system_kind === "skill_invoked") return "skill loaded: " + ((t.system_data||{}).name || "");
+    if (t.system_kind === "skill_context") return "skill ctx: " + ((t.system_data||{}).name || "");
     if (t.system_kind === "session_start") return "session start";
     if (t.system_kind === "session_shutdown") return "session end";
     return t.system_kind || "system";
@@ -1101,7 +1102,8 @@ html[data-theme="light"] .theme-toggle .moon { display: none;  }
   function roleLabel(t, userN) {
     if (t.kind === "user") return "You";
     if (t.kind === "assistant") return "Assistant";
-    if (t.system_kind === "skill_invoked") return "Skill invoked";
+    if (t.system_kind === "skill_invoked") return "Skill loaded";
+    if (t.system_kind === "skill_context") return "Skill context";
     if (t.system_kind === "session_start") return "Session start";
     if (t.system_kind === "session_shutdown") return "Session end";
     return "System";
@@ -1128,6 +1130,16 @@ html[data-theme="light"] .theme-toggle .moon { display: none;  }
     if (t.system_kind === "skill_invoked") {
       wrap.appendChild(labelledLine("Skill:", d.name));
       if (d.path) wrap.appendChild(labelledLine("Path:", d.path));
+    } else if (t.system_kind === "skill_context") {
+      wrap.appendChild(labelledLine("Skill:", d.name));
+      if (d.size) {
+        const note = document.createElement("div");
+        note.style.color = "var(--text-muted)";
+        note.style.fontSize = "12px";
+        note.textContent =
+          "Injected " + Number(d.size).toLocaleString() + " chars of skill content (suppressed)";
+        wrap.appendChild(note);
+      }
     } else if (t.system_kind === "session_shutdown") {
       const cc = d.codeChanges || {};
       const txt = document.createElement("div");

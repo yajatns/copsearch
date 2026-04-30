@@ -304,6 +304,39 @@ def test_abort_marks_current_assistant_turn():
     assert assistant.abort_reason == "user initiated"
 
 
+def test_synthetic_skill_context_user_message_becomes_system_turn():
+    """Copilot synthesizes a user.message wrapping the entire SKILL.md when a
+    skill loads. We must compress it to a system turn so renderers don't
+    dump multi-KB blobs into the chat."""
+    big_blob = (
+        '<skill-context name="integration-management">\n'
+        "Base directory for this skill: /Users/foo/.copilot/skills/x\n\n"
+        "---\nname: integration-management\n---\n\n"
+        + "# heading\n" * 200  # simulate a real ~25KB skill body
+    )
+    events = [_ev("user.message", {"content": big_blob})]
+    ns = normalize(events, _meta())
+    assert len(ns.turns) == 1
+    t = ns.turns[0]
+    assert t.kind == "system"
+    assert t.system_kind == "skill_context"
+    assert t.system_data["name"] == "integration-management"
+    # The full content is *not* preserved — only the size for display.
+    assert t.system_data["size"] == len(big_blob)
+    serialized = json.dumps(to_dict(ns))
+    assert "Base directory" not in serialized
+    assert "# heading" not in serialized
+
+
+def test_real_user_message_with_lt_char_is_not_treated_as_synthetic():
+    """A real user prompt that happens to contain `<` must not be misclassified."""
+    real = "<3 your work, can you check the file at /tmp/x?"
+    ns = normalize([_ev("user.message", {"content": real})], _meta())
+    assert len(ns.turns) == 1
+    assert ns.turns[0].kind == "user"
+    assert ns.turns[0].user_text == real
+
+
 def test_skill_invoked_becomes_system_turn():
     events = [
         _ev(
