@@ -205,26 +205,33 @@ class TUI:
         lines.append(("", 0))
         resume_cmd = f"  Resume: copilot --resume {s.id}"
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
-        lines.append(("", 0))
-        lines.append(
-            ("  Press Esc/q: back  Enter/r: resume  v: view  h: html  "
-             "y: copy  d: delete  p: change path",
-             curses.A_DIM)
-        )
 
-        visible = h - 1
-        for i in range(visible):
+        # Body region: everything except the bottom row (which is the persistent help bar).
+        body_h = max(1, h - 1)
+        max_scroll = max(0, len(lines) - body_h)
+        if self.detail_scroll > max_scroll:
+            self.detail_scroll = max_scroll
+        if self.detail_scroll < 0:
+            self.detail_scroll = 0
+
+        for i in range(body_h):
             idx = self.detail_scroll + i
             if idx >= len(lines):
                 break
             text, attr = lines[idx]
             self._addstr(i, 0, text[:w].ljust(w), attr)
 
-        if len(lines) > visible:
-            pct = int((self.detail_scroll / max(1, len(lines) - visible)) * 100)
-            self._addstr(
-                h - 1, 0, f" [{pct}%] j/k scroll  Esc: back  Enter: resume  y: copy", curses.A_DIM
-            )
+        # Persistent help bar — always visible at the bottom row.
+        help_text = (
+            " v:view  h:html  Enter/r:resume  y:copy  "
+            "d:delete  p:path  j/k:scroll  Esc/q:back"
+        )
+        if len(lines) > body_h:
+            pct = int(100 * (self.detail_scroll + body_h) / max(1, len(lines)))
+            help_text = help_text + f"  [{min(pct, 100)}%]"
+        # Reverse-video bar so the keys read like a real status line.
+        bar_attr = curses.color_pair(2) | curses.A_REVERSE | curses.A_BOLD
+        self._addstr(h - 1, 0, help_text[:w].ljust(w), bar_attr)
 
     def _draw_input_bar(self, h: int, w: int) -> None:
         prompt = f" {self.input_prompt}: {self.input_buffer}_"
