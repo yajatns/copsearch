@@ -54,6 +54,9 @@ $ copsearch -q "database migration"
 | **Detail view** | View full plan.md, metadata, and checkpoint info for any session |
 | **Quick resume** | Press `Enter` in detail view to resume (launches Copilot in the correct directory) |
 | **Clipboard copy** | Press `y` to copy `cd <dir> && copilot --resume <id>` to clipboard |
+| **Terminal replay** | `copsearch view <id>` renders the full chat — prompts, replies, tool calls, diffs — as ANSI text |
+| **HTML replay** | `copsearch render <id>` writes a self-contained HTML transcript with collapsible tool calls |
+| **Cached normalization** | First render parses events.jsonl; subsequent renders are ~10× faster from cache |
 | **Zero dependencies** | Only needs Python 3.10+ and PyYAML (usually pre-installed) |
 
 ## Install
@@ -111,6 +114,8 @@ copsearch
 | `Enter` | Detail view (full metadata + plan.md) |
 | `Enter` (in detail) | Resume session (launches Copilot in correct dir) |
 | `r` | Resume session |
+| `v` (in detail) | Render the conversation as ANSI text in the terminal |
+| `h` (in detail) | Render as HTML and open in the browser |
 | `y` | Copy resume command to clipboard |
 | `d` (in detail) | Delete session (with confirmation; blocked for active sessions) |
 | `q` | Quit |
@@ -145,6 +150,79 @@ copsearch --id 884bb
 # List everything
 copsearch --list
 ```
+
+## Viewing a session
+
+Beyond browsing, `copsearch` can render a full session — the user prompts,
+assistant replies, every tool call with arguments and results — either as
+ANSI text in your terminal or as a self-contained HTML file.
+
+```bash
+# Open the interactive viewer (curses, persistent help bar at the bottom)
+copsearch view 884bb
+
+# Render as a self-contained HTML file
+copsearch render 884bb              # writes ~/.copsearch/renders/<id>.html, opens it
+copsearch render 884bb -o foo.html  # custom output path
+copsearch render 884bb --no-open    # don't open the browser
+
+# View options
+copsearch view 884bb --tools full   # show tool args and results inline (default: brief chips)
+copsearch view 884bb --tools none   # chat only, hide all tool calls
+copsearch view 884bb --max-output 30  # cap each tool result at 30 lines
+copsearch view 884bb --turn 5       # only render user turn 5 and its assistant response
+copsearch view 884bb --grep error   # filter to turns matching a pattern
+copsearch view 884bb --plain        # disable ANSI colors (also: NO_COLOR=1)
+copsearch view 884bb --less         # use $PAGER (less) instead of the curses viewer
+copsearch view 884bb --no-pager     # dump rendered text straight to stdout (for piping)
+```
+
+### Viewer keybindings
+
+The interactive viewer shows a persistent help bar at the bottom. Inside it:
+
+| Key | Action |
+|---|---|
+| `j` / `↓` | Scroll one line down |
+| `k` / `↑` | Scroll one line up |
+| `space` / `PgDn` | Half-page down |
+| `b` / `PgUp` | Half-page up |
+| `g` / `G` | Jump to top / bottom |
+| `n` / `N` | Jump to the next / previous user or assistant turn |
+| `t` | Cycle tool detail (brief → full → none) — re-renders inline |
+| `s` | Toggle session-start / skill / shutdown markers |
+| `/` | Search forward (Enter to confirm, Esc to cancel) |
+| `?` | Search backward |
+| `q` / `Esc` | Quit |
+
+The HTML is a single self-contained file (no external assets, no network) so
+it's safe to email, attach to a PR, or open from anywhere. Each tool-call
+chip is collapsed by default — click to expand and see arguments, result,
+and a unified diff for any file edits.
+
+## Cache and indexing
+
+The first `view` or `render` of a session parses its events.jsonl and
+caches the normalized form at `~/.copsearch/cache/<id>/`. Subsequent renders
+of the same session are ~10× faster.
+
+```bash
+# Pre-warm the cache for a window of recent sessions
+copsearch index --since 7d
+
+# Pre-warm in the background — no daemon, just shell backgrounding
+copsearch index --all &
+
+# Inspect the cache
+copsearch cache stats
+copsearch cache clear --orphans   # remove caches whose source session is gone
+copsearch cache clear --id 884bb
+copsearch cache clear             # wipe everything (asks for confirmation)
+```
+
+Active sessions (those still being appended to) are always re-parsed —
+their cache would be stale by the time it lands. Idle sessions are cached
+once and reused until events.jsonl gets newer.
 
 ## How It Works
 
@@ -184,14 +262,22 @@ The search indexes summaries, plan titles, plan text, branch names, project name
 ```
 copsearch/
 ├── src/copsearch/
-│   ├── __init__.py      # Package version
-│   ├── cli.py           # CLI entry point and argument parsing
-│   ├── session.py       # Session data model, loader, active detection
-│   ├── filters.py       # Filtering logic
-│   └── tui.py           # Curses-based interactive TUI
+│   ├── __init__.py        # Package version
+│   ├── cli.py             # CLI entry point + view/render/index/cache subcommands
+│   ├── session.py         # Session data model, loader, active detection
+│   ├── filters.py         # Filtering logic
+│   ├── tui.py             # Curses-based interactive TUI
+│   ├── normalize.py       # events.jsonl → canonical Turn list (renderer-agnostic)
+│   ├── cache.py           # On-disk gzipped cache of normalized sessions
+│   ├── render_cli.py      # ANSI/plain-text renderer for the terminal
+│   └── render_html.py     # Self-contained HTML renderer
 ├── tests/
-│   ├── test_session.py  # Session loader tests
-│   └── test_filters.py  # Filter logic tests
+│   ├── test_session.py    # Session loader tests
+│   ├── test_filters.py    # Filter logic tests
+│   ├── test_normalize.py  # Normalizer tests
+│   ├── test_cache.py      # Cache layer tests
+│   ├── test_render_cli.py # CLI renderer tests
+│   └── test_render_html.py# HTML renderer tests
 ├── pyproject.toml       # Package config
 ├── LICENSE              # MIT
 └── README.md
