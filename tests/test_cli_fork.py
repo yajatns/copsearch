@@ -13,11 +13,17 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def _run(args: list[str], env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    """Invoke the copsearch CLI in a subprocess with HOME redirected to a tmp dir."""
+    """Invoke the copsearch CLI in a subprocess with HOME redirected to a tmp dir.
+
+    On Windows, ``Path.home()`` reads ``USERPROFILE`` (not ``HOME``), so when
+    callers redirect ``HOME`` we mirror it to ``USERPROFILE`` as well.
+    """
     import os
     env = os.environ.copy()
     if env_extra:
         env.update(env_extra)
+        if "HOME" in env_extra and "USERPROFILE" not in env_extra:
+            env["USERPROFILE"] = env_extra["HOME"]
     return subprocess.run(
         [sys.executable, "-m", "copsearch.cli", *args],
         capture_output=True,
