@@ -48,10 +48,7 @@ def _throwaway_nudge(sessions: list[Session]) -> str | None:
         else:
             hours = delta.seconds // 3600
             oldest_age = f"{hours}h" if hours > 0 else f"{delta.seconds // 60}m"
-    return (
-        f"\033[2m🗑️  {len(throws)} throw-away forks (oldest {oldest_age}) — "
-        f"copsearch -T to review\033[0m"
-    )
+    return f"🗑️  {len(throws)} throw-away forks (oldest {oldest_age}) — copsearch -T to review"
 
 
 def print_table(sessions: list[Session]) -> None:
@@ -181,11 +178,13 @@ def _legacy_main() -> None:
     nudge = _throwaway_nudge(sessions)
 
     if args.list or has_any_filter:
+        # In scripted/filtered output we deliberately suppress the nudge —
+        # it would be noise (and break tools parsing the table).
         print_table(filtered)
     else:
-        if nudge:
-            print(nudge)
-        tui = TUI(sessions)
+        # Pass into TUI as the initial status message; printing before
+        # curses starts is invisible (curses wipes the screen on entry).
+        tui = TUI(sessions, initial_message=nudge or "")
         tui.run()
 
 

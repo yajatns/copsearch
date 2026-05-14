@@ -41,6 +41,18 @@ def test_load_sessions_basic(tmp_path: Path):
     assert all(isinstance(s, Session) for s in sessions)
 
 
+def test_load_sessions_skips_inflight_fork_tmp_dirs(tmp_path: Path):
+    """A crash mid-fork can leave a .fork-<id>.tmp dir with a workspace.yaml.
+    The loader must not treat it as a real session — otherwise a phantom
+    entry shows up in the list."""
+    _make_session_dir(tmp_path, "real-444", summary="Real one", branch="main")
+    _make_session_dir(tmp_path, ".fork-aaa-bbb.tmp", summary="In flight", branch="x")
+
+    sessions = load_sessions(tmp_path)
+    assert len(sessions) == 1
+    assert sessions[0].id == "real-444"
+
+
 def test_session_fields(tmp_path: Path):
     _make_session_dir(
         tmp_path,

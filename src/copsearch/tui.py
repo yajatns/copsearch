@@ -20,7 +20,7 @@ class TUI:
         "f:fork  F:named  !:toss  D:del  Enter:detail  r:resume  y:copy  q:quit"
     )
 
-    def __init__(self, sessions: list[Session]):
+    def __init__(self, sessions: list[Session], initial_message: str = ""):
         self.all_sessions = sessions
         self.sessions = list(sessions)
         self.cursor = 0
@@ -37,7 +37,7 @@ class TUI:
         self.input_buffer = ""
         self.input_target = ""
         self.detail_scroll = 0
-        self.message = ""
+        self.message = initial_message
         self.sort_key = "updated"  # updated | project | branch
 
     def run(self) -> None:

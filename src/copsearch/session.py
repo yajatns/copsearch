@@ -295,6 +295,11 @@ def load_sessions(session_dir: Path | None = None) -> list[Session]:
 
     sessions: list[Session] = []
     for d in base.iterdir():
+        # Skip in-flight fork temp dirs — they may have a partial workspace.yaml
+        # written before a crash and would otherwise show up as a phantom
+        # session.
+        if d.name.startswith(".fork-") and d.name.endswith(".tmp"):
+            continue
         ws = d / "workspace.yaml"
         if not ws.exists():
             continue
