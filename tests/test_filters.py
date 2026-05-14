@@ -102,3 +102,17 @@ def test_query_searches_plan_text(tmp_path: Path):
     result = filter_sessions(sessions, query="OAuth")
     assert len(result) == 1
     assert result[0].id == "s1"
+
+
+def test_throwaway_only_filter(tmp_path: Path):
+    _make_session_dir(tmp_path, "keep-1")
+    _make_session_dir(tmp_path, "toss-1", throwaway=True)
+    _make_session_dir(tmp_path, "toss-2", throwaway=True)
+
+    sessions = load_sessions(tmp_path)
+    result = filter_sessions(sessions, throwaway_only=True)
+    assert len(result) == 2
+    assert all(s.throwaway for s in result)
+
+    result_all = filter_sessions(sessions)
+    assert len(result_all) == 3

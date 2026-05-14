@@ -15,6 +15,7 @@ def filter_sessions(
     branch: str = "",
     since: str = "",
     query: str = "",
+    throwaway_only: bool = False,
 ) -> list[Session]:
     """Apply filters to a list of sessions.
 
@@ -24,6 +25,7 @@ def filter_sessions(
         branch: Glob pattern matched against branch name.
         since: Time filter — e.g. '7d', '24h', '30m', or ISO date string.
         query: Space-separated search terms matched against all session text.
+        throwaway_only: If True, keep only sessions marked throwaway.
 
     Returns:
         Filtered list of sessions (same order as input).
@@ -49,6 +51,9 @@ def filter_sessions(
     if query:
         terms = query.lower().split()
         result = [s for s in result if all(t in s.searchable for t in terms)]
+
+    if throwaway_only:
+        result = [s for s in result if s.throwaway]
 
     return result
 

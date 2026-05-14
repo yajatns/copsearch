@@ -271,3 +271,39 @@ def test_update_cwd(tmp_path: Path):
     # Verify it persisted to disk
     ws = yaml.safe_load((tmp_path / "update-001" / "workspace.yaml").read_text())
     assert ws["cwd"] == str(new_dir)
+
+
+def test_throwaway_field_default_false(tmp_path: Path):
+    _make_session_dir(tmp_path, "tw-001")
+    sessions = load_sessions(tmp_path)
+    assert sessions[0].throwaway is False
+    assert sessions[0].forked_from == ""
+    assert sessions[0].forked_at is None
+
+
+def test_throwaway_field_read(tmp_path: Path):
+    _make_session_dir(tmp_path, "tw-002", throwaway=True,
+                      forked_from="11111111-1111-1111-1111-111111111111",
+                      forked_at="2026-04-10T12:00:00Z")
+    sessions = load_sessions(tmp_path)
+    s = sessions[0]
+    assert s.throwaway is True
+    assert s.forked_from == "11111111-1111-1111-1111-111111111111"
+    assert s.forked_at is not None
+
+
+def test_set_throwaway_persists(tmp_path: Path):
+    _make_session_dir(tmp_path, "tw-003")
+    s = load_sessions(tmp_path)[0]
+    assert s.throwaway is False
+    assert s.set_throwaway(True) is True
+    assert s.throwaway is True
+
+    # Reload from disk to confirm persistence.
+    s2 = load_sessions(tmp_path)[0]
+    assert s2.throwaway is True
+
+    # Toggle off — key should be removed.
+    assert s2.set_throwaway(False) is True
+    ws = yaml.safe_load((tmp_path / "tw-003" / "workspace.yaml").read_text())
+    assert "throwaway" not in ws

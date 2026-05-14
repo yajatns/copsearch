@@ -8,13 +8,34 @@ import shlex
 import subprocess
 import sys
 import textwrap
+from datetime import datetime, timezone
 from pathlib import Path
 
 from copsearch.filters import filter_sessions
 from copsearch.session import Session, load_sessions
 from copsearch.tui import TUI
 
-SUBCOMMANDS = {"view", "render", "index", "cache"}
+SUBCOMMANDS = {"view", "render", "index", "cache", "fork"}
+
+
+def _throwaway_nudge(sessions: list[Session]) -> str | None:
+    """One-line reminder if there are accumulated throw-away forks.
+
+    Returns the message to print, or None if no nudge is warranted.
+    Threshold: at least 3 throw-aways present.
+    """
+    throws = [s for s in sessions if s.throwaway]
+    if len(throws) < 3:
+        return None
+    oldest_age = "?"
+    with_age = [s for s in throws if s.updated_at]
+    if with_age:
+        oldest = max(with_age, key=lambda s: (datetime.now(timezone.utc) - s.updated_at))
+        oldest_age = oldest.age_str
+    return (
+        f"\033[2m🗑️  {len(throws)} throw-away forks (oldest {oldest_age}) — "
+        f"copsearch -T to review\033[0m"
+    )
 
 
 def print_table(sessions: list[Session]) -> None:
@@ -82,6 +103,8 @@ def _legacy_main() -> None:
 
               copsearch view <id>                # render a session in the terminal
               copsearch render <id>              # render a session as HTML
+              copsearch fork <id>                # fork a session (throw-away by default)
+              copsearch fork <id> --name "X"     # named persistent fork
               copsearch index --since 7d         # pre-warm the cache
               copsearch cache stats              # cache size + orphans
         """),
@@ -96,6 +119,10 @@ def _legacy_main() -> None:
     )
     parser.add_argument(
         "-a", "--active", action="store_true", help="Show only active (running) sessions"
+    )
+    parser.add_argument(
+        "-T", "--throwaway", action="store_true",
+        help="Show only throw-away forks (sessions marked for cleanup)",
     )
     parser.add_argument(
         "-V", "--version", action="store_true", help="Print version and exit"
@@ -123,15 +150,25 @@ def _legacy_main() -> None:
         print(f"cd {s.cwd} && copilot --resume {s.id}")
         sys.exit(0)
 
-    filtered = filter_sessions(sessions, args.project, args.branch, args.since, args.query)
+    filtered = filter_sessions(
+        sessions, args.project, args.branch, args.since, args.query,
+        throwaway_only=args.throwaway,
+    )
     if args.active:
         filtered = [s for s in filtered if s.is_active]
 
-    has_any_filter = args.project or args.branch or args.since or args.query or args.active
+    has_any_filter = (
+        args.project or args.branch or args.since or args.query
+        or args.active or args.throwaway
+    )
+
+    nudge = _throwaway_nudge(sessions)
 
     if args.list or has_any_filter:
         print_table(filtered)
     else:
+        if nudge:
+            print(nudge)
         tui = TUI(sessions)
         tui.run()
 
@@ -148,6 +185,8 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> None:
         return _cmd_index(argv)
     if cmd == "cache":
         return _cmd_cache(argv)
+    if cmd == "fork":
+        return _cmd_fork(argv)
     print(f"Unknown subcommand: {cmd}", file=sys.stderr)
     sys.exit(2)
 
@@ -554,6 +593,85 @@ def _humanize_bytes(n: int) -> str:
             return f"{val:.1f} {unit}"
         val /= 1024
     return f"{val:.1f} TB"
+
+
+# ── fork subcommand ──────────────────────────────────────────────────────────
+
+
+def _cmd_fork(argv: list[str]) -> None:
+    """copsearch fork <id> — clone a session into a fresh UUID."""
+    parser = argparse.ArgumentParser(
+        prog="copsearch fork",
+        description=(
+            "Fork a Copilot session: copy events + artifacts into a new "
+            "session directory with a fresh UUID. The source is untouched."
+        ),
+        epilog=textwrap.dedent("""\
+            examples:
+              copsearch fork 3910a1c3                   # quick fork (throw-away)
+              copsearch fork 3910a1c3 --name "Try X"    # named persistent fork
+              copsearch fork 3910a1c3 --keep            # persistent without a name
+              copsearch fork 3910a1c3 --resume          # fork and launch copilot
+              copsearch fork 3910a1c3 --json            # machine-readable output
+        """),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("id", help="Source session ID (or unique prefix)")
+    parser.add_argument("--name", default=None, help="Name the fork (implies --keep)")
+    parser.add_argument(
+        "--keep", action="store_true",
+        help="Persistent fork (default: throw-away unless --name is given)",
+    )
+    parser.add_argument(
+        "--throwaway", action="store_true",
+        help="Force throw-away even if --name is given",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="After forking, exec `copilot --resume=<new-id>` in this terminal",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Print result as JSON",
+    )
+    args = parser.parse_args(argv)
+
+    from copsearch.fork import ForkError, fork_session
+
+    src = _resolve_session(args.id)
+
+    # Default rule: throw-away unless --keep or --name is given.
+    if args.throwaway:
+        throwaway = True
+    elif args.keep or args.name:
+        throwaway = False
+    else:
+        throwaway = True
+
+    try:
+        new_dir = fork_session(
+            src.session_dir, name=args.name, throwaway=throwaway,
+        )
+    except ForkError as exc:
+        print(f"Fork failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    new_id = new_dir.name
+    if args.json:
+        import json
+        print(json.dumps({
+            "new_id": new_id,
+            "new_dir": str(new_dir),
+            "source_id": src.id,
+            "throwaway": throwaway,
+            "name": args.name,
+        }))
+    else:
+        marker = "🗑️  " if throwaway else ""
+        print(f"{marker}Forked {src.id[:12]} → {new_id}")
+        print(f"  Resume: copilot --resume={new_id}")
+
+    if args.resume:
+        os.execvp("copilot", ["copilot", f"--resume={new_id}"])
 
 
 if __name__ == "__main__":

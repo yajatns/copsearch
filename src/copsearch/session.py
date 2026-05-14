@@ -62,6 +62,9 @@ class Session:
         "user_messages",
         "assistant_turns",
         "has_events",
+        "throwaway",
+        "forked_from",
+        "forked_at",
     )
 
     def __init__(self, data: dict, session_dir: Path):
@@ -77,6 +80,12 @@ class Session:
 
         self.created_at: datetime | None = _parse_date(data.get("created_at"))
         self.updated_at: datetime | None = _parse_date(data.get("updated_at"))
+
+        # Fork metadata (written by copsearch.fork.fork_session). Copilot
+        # ignores these unknown YAML keys.
+        self.throwaway: bool = bool(data.get("throwaway", False))
+        self.forked_from: str = str(data.get("forked_from") or "")
+        self.forked_at: datetime | None = _parse_date(data.get("forked_at"))
 
         # Detect active session via inuse.*.lock files
         self.is_active: bool = False
@@ -199,6 +208,28 @@ class Session:
             self.cwd = new_path
             normalized = os.path.normpath(new_path) if new_path else ""
             self.project = os.path.basename(normalized) if normalized else ""
+            return True
+        except (OSError, yaml.YAMLError, TypeError):
+            return False
+
+    def set_throwaway(self, value: bool) -> bool:
+        """Toggle the throw-away marker in workspace.yaml. Returns True on success."""
+        workspace_file = self.session_dir / "workspace.yaml"
+        if not workspace_file.exists():
+            return False
+        try:
+            data = yaml.safe_load(workspace_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return False
+            if value:
+                data["throwaway"] = True
+            else:
+                data.pop("throwaway", None)
+            workspace_file.write_text(
+                yaml.dump(data, default_flow_style=False, sort_keys=False),
+                encoding="utf-8",
+            )
+            self.throwaway = bool(value)
             return True
         except (OSError, yaml.YAMLError, TypeError):
             return False
