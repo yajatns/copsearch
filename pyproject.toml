@@ -57,5 +57,10 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# render_html.py is mostly an inline HTML/JS template — splitting strings
+# there mangles the markup and provides no readability benefit.
+"src/copsearch/render_html.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -205,25 +205,33 @@ class TUI:
         lines.append(("", 0))
         resume_cmd = f"  Resume: copilot --resume {s.id}"
         lines.append((resume_cmd, curses.color_pair(4) | curses.A_BOLD))
-        lines.append(("", 0))
-        lines.append(
-            ("  Press Esc/q: back  Enter/r: resume  y: copy  d: delete  p: change path",
-             curses.A_DIM)
-        )
 
-        visible = h - 1
-        for i in range(visible):
+        # Body region: everything except the bottom row (which is the persistent help bar).
+        body_h = max(1, h - 1)
+        max_scroll = max(0, len(lines) - body_h)
+        if self.detail_scroll > max_scroll:
+            self.detail_scroll = max_scroll
+        if self.detail_scroll < 0:
+            self.detail_scroll = 0
+
+        for i in range(body_h):
             idx = self.detail_scroll + i
             if idx >= len(lines):
                 break
             text, attr = lines[idx]
             self._addstr(i, 0, text[:w].ljust(w), attr)
 
-        if len(lines) > visible:
-            pct = int((self.detail_scroll / max(1, len(lines) - visible)) * 100)
-            self._addstr(
-                h - 1, 0, f" [{pct}%] j/k scroll  Esc: back  Enter: resume  y: copy", curses.A_DIM
-            )
+        # Persistent help bar — always visible at the bottom row.
+        help_text = (
+            " v:view  h:html  Enter/r:resume  y:copy  "
+            "d:delete  p:path  j/k:scroll  Esc/q:back"
+        )
+        if len(lines) > body_h:
+            pct = int(100 * (self.detail_scroll + body_h) / max(1, len(lines)))
+            help_text = help_text + f"  [{min(pct, 100)}%]"
+        # Reverse-video bar so the keys read like a real status line.
+        bar_attr = curses.color_pair(2) | curses.A_REVERSE | curses.A_BOLD
+        self._addstr(h - 1, 0, help_text[:w].ljust(w), bar_attr)
 
     def _draw_input_bar(self, h: int, w: int) -> None:
         prompt = f" {self.input_prompt}: {self.input_buffer}_"
@@ -346,6 +354,10 @@ class TUI:
                 self.mode = "confirm_delete"
         elif key == ord("p"):
             self._start_input("New path", "path")
+        elif key == ord("v"):
+            self._view_session_cli()
+        elif key == ord("h"):
+            self._render_session_html()
         return False
 
     def _handle_input(self, key: int) -> None:
@@ -463,6 +475,62 @@ class TUI:
             raise SystemExit(_sp.call(["copilot", "--resume", s.id]))
         else:
             os.execlp("copilot", "copilot", "--resume", s.id)
+
+    def _view_session_cli(self) -> None:
+        """Drop out of curses, run ``copsearch view <id>``, then return."""
+        if not self.sessions:
+            return
+        s = self.sessions[self.cursor]
+        # Tear down curses while the pager is active so it can repaint normally.
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            subprocess.run(["copsearch", "view", s.id], check=False)
+        except (FileNotFoundError, OSError) as exc:
+            # Silently fall back; the message is shown after we re-enter curses.
+            self.message = f"Failed to launch viewer: {exc}"
+        finally:
+            curses.reset_prog_mode()
+            self.scr.refresh()
+
+    def _render_session_html(self) -> None:
+        """Render the highlighted session as HTML and open it in the browser.
+
+        Synchronous — we wait for ``copsearch render`` to finish so that any
+        error surfaces back into the TUI's status line. The actual browser
+        window is launched non-blocking via ``Popen``.
+        """
+        if not self.sessions:
+            return
+        s = self.sessions[self.cursor]
+        # Decide the path here so we don't need to parse copsearch's stdout —
+        # robust against future format changes and avoids a fragile string
+        # split on "Wrote ".
+        out_path = (
+            os.path.expanduser(f"~/.copsearch/renders/{s.id}.html")
+        )
+        try:
+            result = subprocess.run(
+                ["copsearch", "render", s.id, "--no-open", "-o", out_path],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode != 0:
+                self.message = f"render failed: {(result.stderr or '').strip()[:80]}"
+                return
+            if not os.path.exists(out_path):
+                self.message = f"render produced no file at {out_path}"
+                return
+            if sys.platform == "darwin":
+                subprocess.Popen(["open", out_path])
+            elif sys.platform == "win32":
+                os.startfile(out_path)  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", out_path])
+            self.message = f"Opened HTML: {os.path.basename(out_path)}"
+        except (FileNotFoundError, OSError) as exc:
+            self.message = f"render failed: {exc}"
 
     def _copy_resume_cmd(self) -> None:
         if not self.sessions:
