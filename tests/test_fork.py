@@ -189,8 +189,13 @@ def test_fork_cleans_tmp_on_failure(tmp_path: Path, monkeypatch):
         raise RuntimeError("simulated mid-copy failure")
 
     monkeypatch.setattr(fork_mod, "_rewrite_workspace", boom)
-    with pytest.raises(RuntimeError, match="simulated"):
+    # Unexpected errors are wrapped in ForkError so the CLI/TUI layers
+    # (which only catch ForkError) render a clean message instead of a
+    # traceback. The original exception is preserved via __cause__.
+    with pytest.raises(ForkError, match="unexpected failure") as exc_info:
         fork_session(src)
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "simulated" in str(exc_info.value.__cause__)
 
     leftover = list(tmp_path.glob(".fork-*.tmp"))
     assert leftover == []

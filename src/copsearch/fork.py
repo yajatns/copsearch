@@ -272,8 +272,14 @@ def fork_session(
 
         # 4. Atomic publish.
         os.rename(tmp_dir, final_dir)
-    except Exception:
+    except ForkError:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise
+    except Exception as exc:
+        # Wrap unexpected I/O / OS errors so callers that only catch
+        # ForkError still surface a clean "Fork failed: <reason>" instead
+        # of an uncaught traceback.
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise ForkError(f"unexpected failure during fork: {exc}") from exc
 
     return final_dir

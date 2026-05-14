@@ -290,6 +290,7 @@ class TUI:
 
     def _handle_list(self, key: int) -> bool:
         """Handle keypress in list mode. Returns True to quit."""
+        msg_before = self.message
         if key in (ord("q"), ord("Q")):
             return True
         elif key in (curses.KEY_DOWN, ord("j")):
@@ -367,7 +368,9 @@ class TUI:
         elif key == ord("y"):
             self._copy_resume_cmd()
 
-        if key not in (ord("c"),):
+        if self.message == msg_before:
+            # Clear stale message on navigation/no-op keys, but preserve
+            # any message a handler explicitly set this turn.
             self.message = ""
         return False
 

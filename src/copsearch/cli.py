@@ -23,15 +23,31 @@ def _throwaway_nudge(sessions: list[Session]) -> str | None:
 
     Returns the message to print, or None if no nudge is warranted.
     Threshold: at least 3 throw-aways present.
+
+    "Oldest" is measured by ``forked_at`` (falling back to ``created_at``),
+    not ``updated_at`` — otherwise resuming an old throw-away would make it
+    look newly created and understate cleanup pressure.
     """
     throws = [s for s in sessions if s.throwaway]
     if len(throws) < 3:
         return None
+
+    def _fork_age(s: Session):
+        return s.forked_at or s.created_at
+
     oldest_age = "?"
-    with_age = [s for s in throws if s.updated_at]
+    with_age = [s for s in throws if _fork_age(s) is not None]
     if with_age:
-        oldest = max(with_age, key=lambda s: (datetime.now(timezone.utc) - s.updated_at))
-        oldest_age = oldest.age_str
+        now = datetime.now(timezone.utc)
+        oldest = min(with_age, key=_fork_age)
+        delta = now - _fork_age(oldest)
+        if delta.days > 30:
+            oldest_age = f"{delta.days // 30}mo"
+        elif delta.days > 0:
+            oldest_age = f"{delta.days}d"
+        else:
+            hours = delta.seconds // 3600
+            oldest_age = f"{hours}h" if hours > 0 else f"{delta.seconds // 60}m"
     return (
         f"\033[2m🗑️  {len(throws)} throw-away forks (oldest {oldest_age}) — "
         f"copsearch -T to review\033[0m"
