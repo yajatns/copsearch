@@ -90,6 +90,16 @@ def print_table(sessions: list[Session]) -> None:
 
 def main() -> None:
     """Main entry point."""
+    # Force UTF-8 on stdout/stderr so unicode glyphs (─ ↳ 🗑️) don't crash
+    # on Windows consoles defaulting to cp1252. Python 3.7+ supports this.
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, "reconfigure", None)
+        if reconf is not None:
+            try:
+                reconf(encoding="utf-8")
+            except Exception:
+                pass
+
     # Subcommand mode: copsearch view <id>, copsearch render <id>, etc.
     # Anything else falls through to the legacy flag-only interface.
     if len(sys.argv) > 1 and sys.argv[1] in SUBCOMMANDS:
