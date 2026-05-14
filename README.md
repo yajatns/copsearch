@@ -113,6 +113,7 @@ copsearch
 | `f` | Quick **fork** highlighted session (throw-away) |
 | `F` | Named **fork** (prompts for name; persistent) |
 | `!` | Toggle 🗑️ throw-away marker on highlighted session |
+| `D` | Delete highlighted session (with `y/N` confirmation; blocked for active) |
 | `c` | Clear all filters |
 | `s` | Cycle sort: updated → project → branch |
 | `Enter` | Detail view (full metadata + plan.md) |

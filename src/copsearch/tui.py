@@ -17,7 +17,7 @@ class TUI:
 
     HELP_TEXT = (
         "↑↓/jk: nav  /: search  p:proj  b:branch  d:since  a:active  t:throw  "
-        "f:fork  F:named  !:toss  Enter:detail  r:resume  y:copy  q:quit"
+        "f:fork  F:named  !:toss  D:del  Enter:detail  r:resume  y:copy  q:quit"
     )
 
     def __init__(self, sessions: list[Session]):
@@ -32,6 +32,7 @@ class TUI:
         self.filter_active = False
         self.filter_throwaway = False
         self.mode = "list"  # list | detail | input | confirm_delete
+        self.delete_return_mode = "detail"  # where to return on cancel
         self.input_prompt = ""
         self.input_buffer = ""
         self.input_target = ""
@@ -269,20 +270,23 @@ class TUI:
             s.refresh_active()
             if s.is_active:
                 self.message = "Session became active — delete cancelled"
-                self.mode = "detail"
+                self.mode = self.delete_return_mode
                 return
             if s.delete():
                 self.all_sessions.remove(s)
                 self.sessions.remove(s)
                 self.cursor = min(self.cursor, max(0, len(self.sessions) - 1))
                 self.message = f"Deleted session: {s.project or s.id[:12]}"
+                # Always return to list after a successful delete — the source
+                # session is gone, so detail view would be stale.
+                self.mode = "list"
             else:
                 self.message = "Failed to delete session"
-            self.mode = "list"
+                self.mode = self.delete_return_mode
         else:
             # Any other key cancels
             self.message = "Delete cancelled"
-            self.mode = "detail"
+            self.mode = self.delete_return_mode
 
     def _handle_list(self, key: int) -> bool:
         """Handle keypress in list mode. Returns True to quit."""
@@ -342,6 +346,17 @@ class TUI:
             self._start_input("Fork name (Enter = unnamed)", "fork_name")
         elif key == ord("!"):
             self._toggle_throwaway()
+        elif key == ord("D"):
+            if not self.sessions:
+                pass
+            else:
+                s = self.sessions[self.cursor]
+                s.refresh_active()
+                if s.is_active:
+                    self.message = "Cannot delete an active session"
+                else:
+                    self.delete_return_mode = "list"
+                    self.mode = "confirm_delete"
         elif key in (curses.KEY_ENTER, 10, 13):
             if self.sessions:
                 self.mode = "detail"
@@ -381,6 +396,7 @@ class TUI:
             if s.is_active:
                 self.message = "Cannot delete an active session"
             else:
+                self.delete_return_mode = "detail"
                 self.mode = "confirm_delete"
         elif key == ord("p"):
             self._start_input("New path", "path")
