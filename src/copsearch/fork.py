@@ -49,9 +49,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _snapshot_events(src: Path, dst: Path) -> int:
+def _snapshot_events(
+    src: Path, dst: Path, *, src_id: str | None = None, new_id: str | None = None
+) -> int:
     """Copy ``events.jsonl`` byte-for-byte up to its current length, truncating
     any partial trailing line. Returns the number of bytes written.
+
+    When ``src_id`` and ``new_id`` are both supplied, every occurrence of
+    ``"sessionId":"<src_id>"`` is rewritten to point at ``new_id``. Copilot
+    CLI reads ``data.sessionId`` from ``session.start`` (and other events)
+    when resuming a session — if the fork still references the source's id,
+    Copilot will write its ``inuse.<pid>.lock`` into the *source's* directory
+    and the fork looks "idle" while the source falsely lights up as active.
     """
     size = src.stat().st_size
     if size == 0:
@@ -69,6 +78,19 @@ def _snapshot_events(src: Path, dst: Path) -> int:
         buf = b""
     else:
         buf = buf[: last_nl + 1]
+
+    if buf and src_id and new_id and src_id != new_id:
+        # UUIDs are unique enough that a literal substring rewrite of the
+        # exact JSON token is safe — we're not touching event ids or any
+        # other field that just happens to share the value. We accept both
+        # the compact form Copilot CLI emits ("sessionId":"...") and the
+        # whitespace-padded form produced by pretty-printers (used in tests).
+        import re
+
+        pattern = re.compile(
+            rb'("sessionId"\s*:\s*")' + re.escape(src_id.encode("ascii")) + rb'(")'
+        )
+        buf = pattern.sub(rb"\g<1>" + new_id.encode("ascii") + rb"\g<2>", buf)
 
     dst.write_bytes(buf)
     return len(buf)
@@ -141,13 +163,15 @@ def _rewrite_workspace(
         data["name"] = f"Fork of {src_name}"
         data["user_named"] = False
 
-    # Provenance — non-invasive; Copilot ignores unknown YAML keys.
+    # NOTE: Copilot CLI rewrites workspace.yaml on every save with its own
+    # fixed schema, dropping unknown keys. We still write the fork-marker
+    # fields here for the brief window before Copilot first touches the
+    # session (and as a hint to anything that reads workspace.yaml directly),
+    # but the sidecar (.copsearch.json) is the durable source of truth.
     data["forked_from"] = src_id
     if forked_at_event:
         data["forked_at_event"] = forked_at_event
     data["forked_at"] = now
-
-    # Throw-away marker: visible to copsearch, ignored by Copilot.
     if throwaway:
         data["throwaway"] = True
     else:
@@ -235,7 +259,11 @@ def fork_session(
         tmp_dir.mkdir(parents=True, exist_ok=False)
 
         # 1. Snapshot events.jsonl first — this defines the fork's "cut point".
-        events_size = _snapshot_events(src_events, tmp_dir / "events.jsonl")
+        #    Rewrite every "sessionId" reference so Copilot routes its lock
+        #    file (and any other id-keyed state) to the fork's directory.
+        events_size = _snapshot_events(
+            src_events, tmp_dir / "events.jsonl", src_id=src_id, new_id=new_id
+        )
         forked_at_event = (
             _last_event_id((tmp_dir / "events.jsonl").read_bytes()) if events_size else None
         )
@@ -270,7 +298,21 @@ def fork_session(
             throwaway=throwaway,
         )
 
-        # 4. Atomic publish.
+        # 4. Write the durable sidecar. workspace.yaml fields above are
+        #    transient — Copilot's first save will drop them — but the
+        #    sidecar is invisible to Copilot and persists.
+        sidecar_payload: dict[str, object] = {
+            "forked_from": src_id,
+            "forked_at": _now_iso(),
+            "throwaway": bool(throwaway),
+        }
+        if forked_at_event:
+            sidecar_payload["forked_at_event"] = forked_at_event
+        from copsearch.sidecar import write_sidecar
+
+        write_sidecar(tmp_dir, sidecar_payload)
+
+        # 5. Atomic publish.
         os.rename(tmp_dir, final_dir)
     except ForkError:
         shutil.rmtree(tmp_dir, ignore_errors=True)

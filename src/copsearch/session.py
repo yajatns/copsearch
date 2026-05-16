@@ -81,11 +81,45 @@ class Session:
         self.created_at: datetime | None = _parse_date(data.get("created_at"))
         self.updated_at: datetime | None = _parse_date(data.get("updated_at"))
 
-        # Fork metadata (written by copsearch.fork.fork_session). Copilot
-        # ignores these unknown YAML keys.
-        self.throwaway: bool = bool(data.get("throwaway", False))
-        self.forked_from: str = str(data.get("forked_from") or "")
-        self.forked_at: datetime | None = _parse_date(data.get("forked_at"))
+        # Fork metadata. The sidecar (.copsearch.json) is the durable source
+        # of truth — Copilot CLI rewrites workspace.yaml with its own schema
+        # and drops unknown keys, so any fork markers there only survive until
+        # Copilot first saves the session. Sidecar values win when both
+        # sources are present.
+        from copsearch.sidecar import read_sidecar
+
+        sidecar = read_sidecar(session_dir)
+        self.throwaway: bool = bool(sidecar.get("throwaway", data.get("throwaway", False)))
+        self.forked_from: str = str(
+            sidecar.get("forked_from") or data.get("forked_from") or ""
+        )
+        self.forked_at: datetime | None = _parse_date(
+            sidecar.get("forked_at") or data.get("forked_at")
+        )
+
+        # Auto-heal: if the events log thinks this session has a different id
+        # (i.e. it's a fork whose workspace.yaml was already rewritten by
+        # Copilot), backfill the sidecar so future loads don't have to reread
+        # the events file. This also recovers fork provenance for sessions
+        # forked before the sidecar existed.
+        if not self.forked_from and self.id:
+            inferred = _infer_forked_from(session_dir, self.id)
+            if inferred:
+                self.forked_from = inferred
+                try:
+                    from copsearch.sidecar import update_sidecar
+
+                    update_sidecar(
+                        session_dir,
+                        forked_from=inferred,
+                        forked_at=(
+                            self.created_at.isoformat()
+                            if self.created_at
+                            else None
+                        ),
+                    )
+                except Exception:
+                    pass
 
         # Detect active session via inuse.*.lock files
         self.is_active: bool = False
@@ -213,26 +247,37 @@ class Session:
             return False
 
     def set_throwaway(self, value: bool) -> bool:
-        """Toggle the throw-away marker in workspace.yaml. Returns True on success."""
+        """Toggle the throw-away marker. Returns True on success.
+
+        The marker is written to the sidecar (.copsearch.json) so it survives
+        Copilot rewriting workspace.yaml. We also mirror the change into
+        workspace.yaml when present, for any tooling that reads it directly,
+        but the sidecar is authoritative.
+        """
+        from copsearch.sidecar import update_sidecar
+
+        ok_sidecar = update_sidecar(self.session_dir, throwaway=bool(value))
+
         workspace_file = self.session_dir / "workspace.yaml"
-        if not workspace_file.exists():
-            return False
-        try:
-            data = yaml.safe_load(workspace_file.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return False
-            if value:
-                data["throwaway"] = True
-            else:
-                data.pop("throwaway", None)
-            workspace_file.write_text(
-                yaml.dump(data, default_flow_style=False, sort_keys=False),
-                encoding="utf-8",
-            )
+        if workspace_file.exists():
+            try:
+                data = yaml.safe_load(workspace_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    if value:
+                        data["throwaway"] = True
+                    else:
+                        data.pop("throwaway", None)
+                    workspace_file.write_text(
+                        yaml.dump(data, default_flow_style=False, sort_keys=False),
+                        encoding="utf-8",
+                    )
+            except (OSError, yaml.YAMLError, TypeError):
+                # Sidecar is the source of truth — workspace.yaml is best-effort.
+                pass
+
+        if ok_sidecar:
             self.throwaway = bool(value)
-            return True
-        except (OSError, yaml.YAMLError, TypeError):
-            return False
+        return ok_sidecar
 
     def refresh_active(self) -> None:
         """Re-check active status from on-disk lock files."""
@@ -264,6 +309,43 @@ class Session:
                 self.cwd,
             ]
         ).lower()
+
+
+def _infer_forked_from(session_dir: Path, self_id: str) -> str | None:
+    """Detect a fork by inspecting the first event in ``events.jsonl``.
+
+    A fork's events log starts with the source's ``session.start`` event,
+    which carries ``data.sessionId == <source-id>``. If that id differs from
+    the session directory's own id, the session is a fork of that source.
+
+    Returns the inferred source id, or ``None`` if the events log is missing,
+    unreadable, or has a matching sessionId (i.e. not a fork).
+    """
+    events = session_dir / "events.jsonl"
+    if not events.exists():
+        return None
+    try:
+        with events.open(encoding="utf-8", errors="replace") as fh:
+            first = fh.readline()
+    except OSError:
+        return None
+    if not first:
+        return None
+    try:
+        import json as _json
+
+        obj = _json.loads(first)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    data = obj.get("data") or {}
+    sid = data.get("sessionId") if isinstance(data, dict) else None
+    if not sid or not isinstance(sid, str):
+        return None
+    if sid == self_id:
+        return None
+    return sid
 
 
 def _parse_date(val: object) -> datetime | None:

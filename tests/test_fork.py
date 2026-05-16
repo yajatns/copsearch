@@ -228,3 +228,223 @@ def test_fork_into_separate_base_dir(tmp_path: Path):
     new_dir = fork_session(src, base_dir=other)
     assert new_dir.parent == other
     assert new_dir.exists()
+
+
+def test_fork_rewrites_sessionId_in_events(tmp_path: Path):
+    """Copilot CLI reads ``data.sessionId`` from session.start when resuming
+    and writes its inuse.<pid>.lock under that id's directory. If the fork
+    keeps the source's sessionId, the fork's lock lands in the *source's*
+    directory and copsearch lights up the wrong session as active.
+    """
+    src_id = "aaaaaaaa-1111-1111-1111-111111111111"
+    src = _make_source(
+        tmp_path,
+        src_id=src_id,
+        events=[
+            {
+                "type": "session.start",
+                "id": "ev-start",
+                "data": {"sessionId": src_id, "version": 1},
+            },
+            {
+                "type": "user.message",
+                "id": "ev-1",
+                "data": {"sessionId": src_id, "text": "hello"},
+            },
+        ],
+    )
+
+    new_dir = fork_session(src)
+    new_id = new_dir.name
+
+    body = (new_dir / "events.jsonl").read_text()
+    assert src_id not in body, "source sessionId still present"
+    # Both events had a sessionId field — both should be rewritten.
+    import re as _re
+
+    assert len(_re.findall(rf'"sessionId"\s*:\s*"{new_id}"', body)) == 2
+
+    # Source events are untouched.
+    src_body = (src / "events.jsonl").read_text()
+    assert src_id in src_body
+    assert new_id not in src_body
+
+
+def test_fork_sessionId_rewrite_is_localized(tmp_path: Path):
+    """The rewrite must only target the literal ``"sessionId":"<src>"`` token,
+    not arbitrary occurrences of the source id (e.g. inside message text)."""
+    src_id = "bbbbbbbb-2222-2222-2222-222222222222"
+    src = _make_source(
+        tmp_path,
+        src_id=src_id,
+        events=[
+            {
+                "type": "session.start",
+                "id": "ev-start",
+                "data": {"sessionId": src_id},
+            },
+            {
+                "type": "user.message",
+                "id": "ev-1",
+                "data": {"text": f"the previous session id was {src_id}"},
+            },
+        ],
+    )
+
+    new_dir = fork_session(src)
+    body = (new_dir / "events.jsonl").read_text()
+
+    # The session.start sessionId is rewritten...
+    import re as _re
+
+    assert _re.search(rf'"sessionId"\s*:\s*"{new_dir.name}"', body)
+    # ...but the user message that quotes the id verbatim is preserved.
+    assert f"the previous session id was {src_id}" in body
+
+
+def test_fork_writes_sidecar(tmp_path: Path):
+    """Fork metadata lives in .copsearch.json so it survives Copilot CLI
+    rewriting workspace.yaml on save."""
+    from copsearch.sidecar import read_sidecar
+
+    src = _make_source(tmp_path)
+    new_dir = fork_session(src, name="My Fork")
+
+    sidecar = read_sidecar(new_dir)
+    assert sidecar["forked_from"] == src.name
+    assert sidecar["throwaway"] is False
+    assert "forked_at" in sidecar
+    assert "schema" in sidecar
+
+
+def test_fork_sidecar_records_throwaway(tmp_path: Path):
+    from copsearch.sidecar import read_sidecar
+
+    src = _make_source(tmp_path)
+    new_dir = fork_session(src, throwaway=True)
+
+    assert read_sidecar(new_dir)["throwaway"] is True
+
+
+def test_session_reads_fork_metadata_from_sidecar(tmp_path: Path):
+    """If Copilot has wiped workspace.yaml's fork keys, the sidecar still
+    yields forked_from / throwaway / forked_at to copsearch."""
+    import yaml as _yaml
+
+    from copsearch.session import Session
+    from copsearch.sidecar import write_sidecar
+
+    src = _make_source(tmp_path)
+    new_dir = fork_session(src, throwaway=True)
+
+    # Simulate Copilot rewriting workspace.yaml: keep only the fields it
+    # knows about, dropping forked_from / forked_at / throwaway.
+    ws = new_dir / "workspace.yaml"
+    data = _yaml.safe_load(ws.read_text())
+    cleaned = {
+        k: v
+        for k, v in data.items()
+        if k not in {"forked_from", "forked_at", "forked_at_event", "throwaway"}
+    }
+    ws.write_text(_yaml.dump(cleaned, default_flow_style=False, sort_keys=False))
+
+    s = Session(cleaned, new_dir)
+    assert s.forked_from == src.name
+    assert s.throwaway is True
+
+    # And the sidecar wins over a stale workspace.yaml value.
+    write_sidecar(new_dir, {"forked_from": "override-id", "throwaway": False})
+    s2 = Session(cleaned, new_dir)
+    assert s2.forked_from == "override-id"
+    assert s2.throwaway is False
+
+
+def test_session_infers_fork_when_sidecar_missing(tmp_path: Path):
+    """Sessions forked before the sidecar/sessionId-rewrite existed are
+    still detectable: their events.jsonl starts with the source's
+    ``session.start`` event, whose ``data.sessionId`` differs from the
+    directory name."""
+    import yaml as _yaml
+
+    from copsearch.session import Session
+
+    src_id = "11111111-1111-1111-1111-111111111111"
+    legacy_fork_id = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+    legacy = tmp_path / legacy_fork_id
+    legacy.mkdir()
+    (legacy / "workspace.yaml").write_text(
+        _yaml.dump(
+            {
+                "id": legacy_fork_id,
+                "cwd": str(tmp_path),
+                "created_at": "2026-04-01T10:00:00Z",
+                "updated_at": "2026-04-01T11:00:00Z",
+            },
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    )
+    (legacy / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "session.start",
+                "id": "ev-start",
+                "data": {"sessionId": src_id},
+            }
+        )
+        + "\n"
+    )
+
+    data = _yaml.safe_load((legacy / "workspace.yaml").read_text())
+    s = Session(data, legacy)
+    assert s.forked_from == src_id
+
+    # Auto-heal wrote the sidecar back so subsequent loads are fast.
+    from copsearch.sidecar import read_sidecar
+
+    assert read_sidecar(legacy).get("forked_from") == src_id
+
+
+def test_session_does_not_invent_forked_from_for_originals(tmp_path: Path):
+    """A non-forked session whose first event references its own sessionId
+    must not be flagged as a fork."""
+    from copsearch.session import Session
+
+    src = _make_source(
+        tmp_path,
+        events=[
+            {
+                "type": "session.start",
+                "id": "ev-start",
+                "data": {"sessionId": "11111111-1111-1111-1111-111111111111"},
+            },
+        ],
+    )
+    import yaml as _yaml
+
+    data = _yaml.safe_load((src / "workspace.yaml").read_text())
+    s = Session(data, src)
+    assert s.forked_from == ""
+
+
+def test_set_throwaway_persists_to_sidecar(tmp_path: Path):
+    """Toggling the throw-away flag must update the sidecar, not just
+    workspace.yaml — otherwise the change vanishes the next time Copilot
+    saves the session."""
+    import yaml as _yaml
+
+    from copsearch.session import Session
+    from copsearch.sidecar import read_sidecar
+
+    src = _make_source(tmp_path)
+    new_dir = fork_session(src)
+
+    data = _yaml.safe_load((new_dir / "workspace.yaml").read_text())
+    s = Session(data, new_dir)
+    assert s.throwaway is False
+
+    assert s.set_throwaway(True) is True
+    assert read_sidecar(new_dir)["throwaway"] is True
+
+    assert s.set_throwaway(False) is True
+    assert read_sidecar(new_dir)["throwaway"] is False

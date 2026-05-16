@@ -212,9 +212,32 @@ copsearch --throwaway      # or -T
 - ❌ `inuse.<pid>.lock` — the new fork is offline until you resume it.
 - ❌ `rewind-snapshots/` — Copilot's internal undo; rebuilt on first turn.
 
-The new `workspace.yaml` records `forked_from`, `forked_at`, and
-`forked_at_event` so the detail view can show `↳ Fork of <src-id>`. Copilot
-ignores these unknown YAML keys.
+The fork-marker fields (`forked_from`, `forked_at`, `forked_at_event`,
+`throwaway`) live in a sidecar file `.copsearch.json` inside the session
+directory. Copilot CLI rewrites `workspace.yaml` with its own schema on every
+save and would silently drop unknown keys — the sidecar is invisible to
+Copilot and persists. (We also stamp the same fields into `workspace.yaml`
+so a fresh fork is detectable for the brief window before Copilot first
+saves.)
+
+Each event's `data.sessionId` is rewritten in the new `events.jsonl` to
+point at the fork's id. Copilot reads that field when allocating its
+`inuse.<pid>.lock`; without the rewrite the lock would land in the source's
+directory and copsearch would light up the wrong session as active.
+
+### Repairing legacy forks
+
+Forks created before the sidecar feature shipped lose their `forked_from`
+marker as soon as Copilot rewrites `workspace.yaml`. Run:
+
+```bash
+copsearch repair-forks --dry-run   # preview
+copsearch repair-forks             # backfill .copsearch.json sidecars
+```
+
+This scans every session and checks whether its first event's `sessionId`
+matches the directory name. A mismatch is the unmistakable fingerprint of a
+fork — the source id is recovered and written to the sidecar.
 
 ## Viewing a session
 

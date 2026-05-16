@@ -130,3 +130,45 @@ def test_throwaway_filter_legacy_flag(tmp_path: Path):
     result = _run(["--throwaway"], env_extra={"HOME": str(tmp_path)})
     assert result.returncode == 0
     assert "1 session" in result.stdout
+
+
+def test_repair_forks_writes_sidecar(tmp_path: Path):
+    """`copsearch repair-forks` backfills sidecars for legacy forks."""
+    src_id = "11111111-1111-1111-1111-111111111111"
+    fork_id = "22222222-2222-2222-2222-222222222222"
+
+    # Source: events reference its own id (not a fork).
+    src_dir = _make_session(tmp_path, src_id)
+    (src_dir / "events.jsonl").write_text(
+        json.dumps(
+            {"type": "session.start", "id": "ev-1", "data": {"sessionId": src_id}}
+        )
+        + "\n"
+    )
+
+    # Fork: legacy-style (events still reference the source id, no sidecar).
+    fork_dir = _make_session(tmp_path, fork_id)
+    (fork_dir / "events.jsonl").write_text(
+        json.dumps(
+            {"type": "session.start", "id": "ev-1", "data": {"sessionId": src_id}}
+        )
+        + "\n"
+    )
+
+    # Dry-run reports without writing.
+    result = _run(["repair-forks", "--dry-run"], env_extra={"HOME": str(tmp_path)})
+    assert result.returncode == 0, result.stderr
+    assert "would repair" in result.stdout
+    assert not (fork_dir / ".copsearch.json").exists()
+
+    # Real run writes the sidecar.
+    result = _run(["repair-forks"], env_extra={"HOME": str(tmp_path)})
+    assert result.returncode == 0, result.stderr
+    sidecar_data = json.loads((fork_dir / ".copsearch.json").read_text())
+    assert sidecar_data["forked_from"] == src_id
+    # The genuine source is left alone.
+    assert not (src_dir / ".copsearch.json").exists()
+
+    # Re-running is a no-op.
+    result = _run(["repair-forks"], env_extra={"HOME": str(tmp_path)})
+    assert "repaired 0" in result.stdout

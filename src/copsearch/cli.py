@@ -15,7 +15,7 @@ from copsearch.filters import filter_sessions
 from copsearch.session import Session, load_sessions
 from copsearch.tui import TUI
 
-SUBCOMMANDS = {"view", "render", "index", "cache", "fork"}
+SUBCOMMANDS = {"view", "render", "index", "cache", "fork", "repair-forks"}
 
 
 def _throwaway_nudge(sessions: list[Session]) -> str | None:
@@ -212,8 +212,70 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> None:
         return _cmd_cache(argv)
     if cmd == "fork":
         return _cmd_fork(argv)
+    if cmd == "repair-forks":
+        return _cmd_repair_forks(argv)
     print(f"Unknown subcommand: {cmd}", file=sys.stderr)
     sys.exit(2)
+
+
+def _cmd_repair_forks(argv: list[str]) -> None:
+    """Backfill .copsearch.json sidecars for sessions whose fork markers were
+    wiped by Copilot CLI rewriting workspace.yaml."""
+    parser = argparse.ArgumentParser(
+        prog="copsearch repair-forks",
+        description=(
+            "Scan ~/.copilot/session-state for sessions whose first event "
+            "carries a different sessionId than their directory name "
+            "(unmistakable fingerprint of a fork) and write a sidecar "
+            "pinning forked_from. Idempotent; sessions that already have a "
+            "sidecar are skipped."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Report what would be changed without writing sidecars",
+    )
+    args = parser.parse_args(argv)
+
+    from copsearch.session import DEFAULT_SESSION_DIR, _infer_forked_from
+    from copsearch.sidecar import read_sidecar, update_sidecar
+
+    base = DEFAULT_SESSION_DIR
+    if not base.exists():
+        print(f"No session directory: {base}")
+        return
+
+    fixed = skipped = examined = 0
+    for d in sorted(base.iterdir()):
+        if not d.is_dir():
+            continue
+        if d.name.startswith(".fork-") and d.name.endswith(".tmp"):
+            continue
+        ws = d / "workspace.yaml"
+        if not ws.exists():
+            continue
+        examined += 1
+        sidecar = read_sidecar(d)
+        if sidecar.get("forked_from"):
+            continue
+        inferred = _infer_forked_from(d, d.name)
+        if not inferred:
+            continue
+        skipped += 1
+        if args.dry_run:
+            print(f"would repair {d.name[:12]} → forked_from={inferred[:12]}")
+            continue
+        ok = update_sidecar(d, forked_from=inferred)
+        if ok:
+            fixed += 1
+            print(f"repaired   {d.name[:12]} → forked_from={inferred[:12]}")
+        else:
+            print(f"failed     {d.name[:12]}", file=sys.stderr)
+
+    if args.dry_run:
+        print(f"\nExamined {examined} sessions; {skipped} would be repaired.")
+    else:
+        print(f"\nExamined {examined} sessions; repaired {fixed}.")
 
 
 def _resolve_session(id_prefix: str) -> Session:
