@@ -16,11 +16,11 @@ class TUI:
     """Interactive terminal UI for browsing and resuming Copilot sessions."""
 
     HELP_TEXT = (
-        "↑↓/jk: navigate  /: search  p: project  b: branch  "
-        "d: since  a: active  c: clear  s: sort  Enter: details  r: resume  y: copy  q: quit"
+        "↑↓/jk: nav  /: search  p:proj  b:branch  d:since  a:active  t:throw  "
+        "f:fork  F:named  !:toss  D:del  Enter:detail  r:resume  y:copy  q:quit"
     )
 
-    def __init__(self, sessions: list[Session]):
+    def __init__(self, sessions: list[Session], initial_message: str = ""):
         self.all_sessions = sessions
         self.sessions = list(sessions)
         self.cursor = 0
@@ -30,12 +30,14 @@ class TUI:
         self.filter_branch = ""
         self.filter_since = ""
         self.filter_active = False
+        self.filter_throwaway = False
         self.mode = "list"  # list | detail | input | confirm_delete
+        self.delete_return_mode = "detail"  # where to return on cancel
         self.input_prompt = ""
         self.input_buffer = ""
         self.input_target = ""
         self.detail_scroll = 0
-        self.message = ""
+        self.message = initial_message
         self.sort_key = "updated"  # updated | project | branch
 
     def run(self) -> None:
@@ -109,6 +111,8 @@ class TUI:
             filters_active.append(f"search:{self.filter_text}")
         if self.filter_active:
             filters_active.append("active-only")
+        if self.filter_throwaway:
+            filters_active.append("🗑️ only")
 
         active_count = sum(1 for s in self.all_sessions if s.is_active)
         filter_str = "  ".join(filters_active)
@@ -138,16 +142,24 @@ class TUI:
             indicator = "●" if s.is_active else " "
             plan_mark = "*" if s.has_plan else " "
             prefix = f"{indicator}{plan_mark}"
+            summary_text = s.display_summary
+            if s.throwaway:
+                summary_text = f"🗑️  {summary_text}"
             line = self._format_row(
                 prefix,
                 s.age_str,
                 s.depth_str,
                 s.project[:18],
                 (s.branch or "—")[:24],
-                s.display_summary,
+                summary_text,
                 w,
             )
-            attr = curses.color_pair(1) | curses.A_BOLD if idx == self.cursor else 0
+            if idx == self.cursor:
+                attr = curses.color_pair(1) | curses.A_BOLD
+            elif s.throwaway:
+                attr = curses.A_DIM
+            else:
+                attr = 0
             self._addstr(row, 0, line[:w].ljust(w), attr)
             # Draw the active indicator in green if active (overwrite first char)
             if s.is_active and idx != self.cursor:
@@ -187,6 +199,12 @@ class TUI:
             ("Agent turns", str(s.assistant_turns) if s.has_events else "—"),
             ("Summaries", str(s.summary_count)),
         ]
+        if s.forked_from:
+            fields.append(("↳ Fork of", s.forked_from))
+            if s.forked_at:
+                fields.append(("  Forked at", s.forked_at.strftime("%Y-%m-%d %H:%M")))
+        if s.throwaway:
+            fields.append(("🗑️  Throw-away", "yes — press ! to keep, d to delete"))
         for label, val in fields:
             attr = curses.color_pair(6)
             if label == "Status" and s.is_active:
@@ -223,7 +241,7 @@ class TUI:
 
         # Persistent help bar — always visible at the bottom row.
         help_text = (
-            " v:view  h:html  Enter/r:resume  y:copy  "
+            " v:view  h:html  Enter/r:resume  y:copy  f:fork  F:named  !:toss  "
             "d:delete  p:path  j/k:scroll  Esc/q:back"
         )
         if len(lines) > body_h:
@@ -252,23 +270,27 @@ class TUI:
             s.refresh_active()
             if s.is_active:
                 self.message = "Session became active — delete cancelled"
-                self.mode = "detail"
+                self.mode = self.delete_return_mode
                 return
             if s.delete():
                 self.all_sessions.remove(s)
                 self.sessions.remove(s)
                 self.cursor = min(self.cursor, max(0, len(self.sessions) - 1))
                 self.message = f"Deleted session: {s.project or s.id[:12]}"
+                # Always return to list after a successful delete — the source
+                # session is gone, so detail view would be stale.
+                self.mode = "list"
             else:
                 self.message = "Failed to delete session"
-            self.mode = "list"
+                self.mode = self.delete_return_mode
         else:
             # Any other key cancels
             self.message = "Delete cancelled"
-            self.mode = "detail"
+            self.mode = self.delete_return_mode
 
     def _handle_list(self, key: int) -> bool:
         """Handle keypress in list mode. Returns True to quit."""
+        msg_before = self.message
         if key in (ord("q"), ord("Q")):
             return True
         elif key in (curses.KEY_DOWN, ord("j")):
@@ -300,6 +322,7 @@ class TUI:
             self.filter_branch = ""
             self.filter_since = ""
             self.filter_active = False
+            self.filter_throwaway = False
             self._apply_filters()
             self.message = "Filters cleared"
         elif key == ord("s"):
@@ -312,6 +335,29 @@ class TUI:
             self.filter_active = not self.filter_active
             self._apply_filters()
             self.message = "Active sessions only" if self.filter_active else "Showing all sessions"
+        elif key == ord("t"):
+            self.filter_throwaway = not self.filter_throwaway
+            self._apply_filters()
+            self.message = (
+                "🗑️  Throw-aways only" if self.filter_throwaway else "Showing all sessions"
+            )
+        elif key == ord("f"):
+            self._fork_session(throwaway=True, prompt_name=False)
+        elif key == ord("F"):
+            self._start_input("Fork name (Enter = unnamed)", "fork_name")
+        elif key == ord("!"):
+            self._toggle_throwaway()
+        elif key == ord("D"):
+            if not self.sessions:
+                pass
+            else:
+                s = self.sessions[self.cursor]
+                s.refresh_active()
+                if s.is_active:
+                    self.message = "Cannot delete an active session"
+                else:
+                    self.delete_return_mode = "list"
+                    self.mode = "confirm_delete"
         elif key in (curses.KEY_ENTER, 10, 13):
             if self.sessions:
                 self.mode = "detail"
@@ -322,7 +368,9 @@ class TUI:
         elif key == ord("y"):
             self._copy_resume_cmd()
 
-        if key not in (ord("c"),):
+        if self.message == msg_before:
+            # Clear stale message on navigation/no-op keys, but preserve
+            # any message a handler explicitly set this turn.
             self.message = ""
         return False
 
@@ -351,6 +399,7 @@ class TUI:
             if s.is_active:
                 self.message = "Cannot delete an active session"
             else:
+                self.delete_return_mode = "detail"
                 self.mode = "confirm_delete"
         elif key == ord("p"):
             self._start_input("New path", "path")
@@ -358,6 +407,12 @@ class TUI:
             self._view_session_cli()
         elif key == ord("h"):
             self._render_session_html()
+        elif key == ord("f"):
+            self._fork_session(throwaway=True, prompt_name=False)
+        elif key == ord("F"):
+            self._start_input("Fork name (Enter = unnamed)", "fork_name")
+        elif key == ord("!"):
+            self._toggle_throwaway()
         return False
 
     def _handle_input(self, key: int) -> None:
@@ -385,6 +440,13 @@ class TUI:
                     else:
                         self.message = "Failed to update workspace.yaml"
                 self.mode = "detail"
+                return
+            elif self.input_target == "fork_name":
+                name = self.input_buffer.strip() or None
+                self.mode = "list"
+                # Named fork (F) → persistent. Empty name → still persistent
+                # (the user explicitly chose the named-fork path).
+                self._fork_session(throwaway=False, prompt_name=False, name=name)
                 return
             self._apply_filters()
             self.mode = "list"
@@ -418,11 +480,82 @@ class TUI:
             branch=self.filter_branch,
             since=self.filter_since,
             query=self.filter_text,
+            throwaway_only=self.filter_throwaway,
         )
         if self.filter_active:
             self.sessions = [s for s in self.sessions if s.is_active]
         self.cursor = min(self.cursor, max(0, len(self.sessions) - 1))
         self.scroll = 0
+
+    def _fork_session(
+        self, *, throwaway: bool, prompt_name: bool, name: str | None = None
+    ) -> None:
+        """Fork the highlighted session and jump cursor to the new fork."""
+        if not self.sessions:
+            return
+        src = self.sessions[self.cursor]
+        return_to_detail = self.mode == "detail"
+
+        from copsearch.fork import ForkError, fork_session
+        from copsearch.session import Session as _Session
+
+        try:
+            new_dir = fork_session(src.session_dir, name=name, throwaway=throwaway)
+        except ForkError as exc:
+            self.message = f"Fork failed: {exc}"
+            return
+
+        # Reload the new session so the TUI knows about it.
+        try:
+            import yaml as _yaml
+
+            with open(new_dir / "workspace.yaml") as fh:
+                data = _yaml.safe_load(fh)
+            new_session = _Session(data, new_dir)
+        except Exception as exc:  # pragma: no cover — defensive
+            self.message = f"Forked but reload failed: {exc}"
+            return
+
+        # Insert at top of all_sessions (most recent) so it's visible.
+        self.all_sessions.insert(0, new_session)
+        self._apply_filters()
+
+        # Auto-jump cursor to the new fork.
+        try:
+            self.cursor = self.sessions.index(new_session)
+            self.scroll = max(0, self.cursor - 5)
+        except ValueError:
+            # Filters hide it (e.g. throwaway-only off + new is throwaway and
+            # filter is reversed). Fall back to top.
+            self.cursor = 0
+            self.scroll = 0
+
+        marker = "🗑️  " if throwaway else ""
+        kind = "throw-away" if throwaway else "named"
+        self.message = f"{marker}Forked → {new_session.id[:12]} ({kind})"
+
+        if return_to_detail:
+            self.mode = "detail"
+            self.detail_scroll = 0
+
+    def _toggle_throwaway(self) -> None:
+        """Flip the throwaway flag on the highlighted session."""
+        if not self.sessions:
+            return
+        s = self.sessions[self.cursor]
+        new_val = not s.throwaway
+        if s.set_throwaway(new_val):
+            self.message = (
+                f"🗑️  Marked throw-away: {s.id[:12]}"
+                if new_val
+                else f"Kept (un-tossed): {s.id[:12]}"
+            )
+            # Re-apply filter so the throwaway-only view stays consistent.
+            if self.filter_throwaway:
+                self._apply_filters()
+                self.cursor = min(self.cursor, max(0, len(self.sessions) - 1))
+        else:
+            self.message = "Failed to update workspace.yaml"
 
     def _sort_sessions(self) -> None:
         if self.sort_key == "updated":

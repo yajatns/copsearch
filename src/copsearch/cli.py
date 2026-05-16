@@ -8,13 +8,47 @@ import shlex
 import subprocess
 import sys
 import textwrap
+from datetime import datetime, timezone
 from pathlib import Path
 
 from copsearch.filters import filter_sessions
 from copsearch.session import Session, load_sessions
 from copsearch.tui import TUI
 
-SUBCOMMANDS = {"view", "render", "index", "cache"}
+SUBCOMMANDS = {"view", "render", "index", "cache", "fork", "repair-forks"}
+
+
+def _throwaway_nudge(sessions: list[Session]) -> str | None:
+    """One-line reminder if there are accumulated throw-away forks.
+
+    Returns the message to print, or None if no nudge is warranted.
+    Threshold: at least 3 throw-aways present.
+
+    "Oldest" is measured by ``forked_at`` (falling back to ``created_at``),
+    not ``updated_at`` — otherwise resuming an old throw-away would make it
+    look newly created and understate cleanup pressure.
+    """
+    throws = [s for s in sessions if s.throwaway]
+    if len(throws) < 3:
+        return None
+
+    def _fork_age(s: Session):
+        return s.forked_at or s.created_at
+
+    oldest_age = "?"
+    with_age = [s for s in throws if _fork_age(s) is not None]
+    if with_age:
+        now = datetime.now(timezone.utc)
+        oldest = min(with_age, key=_fork_age)
+        delta = now - _fork_age(oldest)
+        if delta.days > 30:
+            oldest_age = f"{delta.days // 30}mo"
+        elif delta.days > 0:
+            oldest_age = f"{delta.days}d"
+        else:
+            hours = delta.seconds // 3600
+            oldest_age = f"{hours}h" if hours > 0 else f"{delta.seconds // 60}m"
+    return f"🗑️  {len(throws)} throw-away forks (oldest {oldest_age}) — copsearch -T to review"
 
 
 def print_table(sessions: list[Session]) -> None:
@@ -56,6 +90,16 @@ def print_table(sessions: list[Session]) -> None:
 
 def main() -> None:
     """Main entry point."""
+    # Force UTF-8 on stdout/stderr so unicode glyphs (─ ↳ 🗑️) don't crash
+    # on Windows consoles defaulting to cp1252. Python 3.7+ supports this.
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, "reconfigure", None)
+        if reconf is not None:
+            try:
+                reconf(encoding="utf-8")
+            except Exception:
+                pass
+
     # Subcommand mode: copsearch view <id>, copsearch render <id>, etc.
     # Anything else falls through to the legacy flag-only interface.
     if len(sys.argv) > 1 and sys.argv[1] in SUBCOMMANDS:
@@ -82,6 +126,8 @@ def _legacy_main() -> None:
 
               copsearch view <id>                # render a session in the terminal
               copsearch render <id>              # render a session as HTML
+              copsearch fork <id>                # fork a session (throw-away by default)
+              copsearch fork <id> --name "X"     # named persistent fork
               copsearch index --since 7d         # pre-warm the cache
               copsearch cache stats              # cache size + orphans
         """),
@@ -96,6 +142,10 @@ def _legacy_main() -> None:
     )
     parser.add_argument(
         "-a", "--active", action="store_true", help="Show only active (running) sessions"
+    )
+    parser.add_argument(
+        "-T", "--throwaway", action="store_true",
+        help="Show only throw-away forks (sessions marked for cleanup)",
     )
     parser.add_argument(
         "-V", "--version", action="store_true", help="Print version and exit"
@@ -123,16 +173,28 @@ def _legacy_main() -> None:
         print(f"cd {s.cwd} && copilot --resume {s.id}")
         sys.exit(0)
 
-    filtered = filter_sessions(sessions, args.project, args.branch, args.since, args.query)
+    filtered = filter_sessions(
+        sessions, args.project, args.branch, args.since, args.query,
+        throwaway_only=args.throwaway,
+    )
     if args.active:
         filtered = [s for s in filtered if s.is_active]
 
-    has_any_filter = args.project or args.branch or args.since or args.query or args.active
+    has_any_filter = (
+        args.project or args.branch or args.since or args.query
+        or args.active or args.throwaway
+    )
+
+    nudge = _throwaway_nudge(sessions)
 
     if args.list or has_any_filter:
+        # In scripted/filtered output we deliberately suppress the nudge —
+        # it would be noise (and break tools parsing the table).
         print_table(filtered)
     else:
-        tui = TUI(sessions)
+        # Pass into TUI as the initial status message; printing before
+        # curses starts is invisible (curses wipes the screen on entry).
+        tui = TUI(sessions, initial_message=nudge or "")
         tui.run()
 
 
@@ -148,8 +210,72 @@ def _dispatch_subcommand(cmd: str, argv: list[str]) -> None:
         return _cmd_index(argv)
     if cmd == "cache":
         return _cmd_cache(argv)
+    if cmd == "fork":
+        return _cmd_fork(argv)
+    if cmd == "repair-forks":
+        return _cmd_repair_forks(argv)
     print(f"Unknown subcommand: {cmd}", file=sys.stderr)
     sys.exit(2)
+
+
+def _cmd_repair_forks(argv: list[str]) -> None:
+    """Backfill .copsearch.json sidecars for sessions whose fork markers were
+    wiped by Copilot CLI rewriting workspace.yaml."""
+    parser = argparse.ArgumentParser(
+        prog="copsearch repair-forks",
+        description=(
+            "Scan ~/.copilot/session-state for sessions whose first event "
+            "carries a different sessionId than their directory name "
+            "(unmistakable fingerprint of a fork) and write a sidecar "
+            "pinning forked_from. Idempotent; sessions that already have a "
+            "sidecar are skipped."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Report what would be changed without writing sidecars",
+    )
+    args = parser.parse_args(argv)
+
+    from copsearch.session import DEFAULT_SESSION_DIR, _infer_forked_from
+    from copsearch.sidecar import read_sidecar, update_sidecar
+
+    base = DEFAULT_SESSION_DIR
+    if not base.exists():
+        print(f"No session directory: {base}")
+        return
+
+    fixed = skipped = examined = 0
+    for d in sorted(base.iterdir()):
+        if not d.is_dir():
+            continue
+        if d.name.startswith(".fork-") and d.name.endswith(".tmp"):
+            continue
+        ws = d / "workspace.yaml"
+        if not ws.exists():
+            continue
+        examined += 1
+        sidecar = read_sidecar(d)
+        if sidecar.get("forked_from"):
+            continue
+        inferred = _infer_forked_from(d, d.name)
+        if not inferred:
+            continue
+        skipped += 1
+        if args.dry_run:
+            print(f"would repair {d.name[:12]} → forked_from={inferred[:12]}")
+            continue
+        ok = update_sidecar(d, forked_from=inferred)
+        if ok:
+            fixed += 1
+            print(f"repaired   {d.name[:12]} → forked_from={inferred[:12]}")
+        else:
+            print(f"failed     {d.name[:12]}", file=sys.stderr)
+
+    if args.dry_run:
+        print(f"\nExamined {examined} sessions; {skipped} would be repaired.")
+    else:
+        print(f"\nExamined {examined} sessions; repaired {fixed}.")
 
 
 def _resolve_session(id_prefix: str) -> Session:
@@ -554,6 +680,85 @@ def _humanize_bytes(n: int) -> str:
             return f"{val:.1f} {unit}"
         val /= 1024
     return f"{val:.1f} TB"
+
+
+# ── fork subcommand ──────────────────────────────────────────────────────────
+
+
+def _cmd_fork(argv: list[str]) -> None:
+    """copsearch fork <id> — clone a session into a fresh UUID."""
+    parser = argparse.ArgumentParser(
+        prog="copsearch fork",
+        description=(
+            "Fork a Copilot session: copy events + artifacts into a new "
+            "session directory with a fresh UUID. The source is untouched."
+        ),
+        epilog=textwrap.dedent("""\
+            examples:
+              copsearch fork 3910a1c3                   # quick fork (throw-away)
+              copsearch fork 3910a1c3 --name "Try X"    # named persistent fork
+              copsearch fork 3910a1c3 --keep            # persistent without a name
+              copsearch fork 3910a1c3 --resume          # fork and launch copilot
+              copsearch fork 3910a1c3 --json            # machine-readable output
+        """),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("id", help="Source session ID (or unique prefix)")
+    parser.add_argument("--name", default=None, help="Name the fork (implies --keep)")
+    parser.add_argument(
+        "--keep", action="store_true",
+        help="Persistent fork (default: throw-away unless --name is given)",
+    )
+    parser.add_argument(
+        "--throwaway", action="store_true",
+        help="Force throw-away even if --name is given",
+    )
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="After forking, exec `copilot --resume=<new-id>` in this terminal",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Print result as JSON",
+    )
+    args = parser.parse_args(argv)
+
+    from copsearch.fork import ForkError, fork_session
+
+    src = _resolve_session(args.id)
+
+    # Default rule: throw-away unless --keep or --name is given.
+    if args.throwaway:
+        throwaway = True
+    elif args.keep or args.name:
+        throwaway = False
+    else:
+        throwaway = True
+
+    try:
+        new_dir = fork_session(
+            src.session_dir, name=args.name, throwaway=throwaway,
+        )
+    except ForkError as exc:
+        print(f"Fork failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    new_id = new_dir.name
+    if args.json:
+        import json
+        print(json.dumps({
+            "new_id": new_id,
+            "new_dir": str(new_dir),
+            "source_id": src.id,
+            "throwaway": throwaway,
+            "name": args.name,
+        }))
+    else:
+        marker = "🗑️  " if throwaway else ""
+        print(f"{marker}Forked {src.id[:12]} → {new_id}")
+        print(f"  Resume: copilot --resume={new_id}")
+
+    if args.resume:
+        os.execvp("copilot", ["copilot", f"--resume={new_id}"])
 
 
 if __name__ == "__main__":

@@ -109,6 +109,11 @@ copsearch
 | `b` | Filter by branch (glob pattern) |
 | `d` | Filter by date/age |
 | `a` | Toggle: show only active (running) sessions |
+| `t` | Toggle: show only 🗑️ throw-away forks |
+| `f` | Quick **fork** highlighted session (throw-away) |
+| `F` | Named **fork** (prompts for name; persistent) |
+| `!` | Toggle 🗑️ throw-away marker on highlighted session |
+| `D` | Delete highlighted session (with `y/N` confirmation; blocked for active) |
 | `c` | Clear all filters |
 | `s` | Cycle sort: updated → project → branch |
 | `Enter` | Detail view (full metadata + plan.md) |
@@ -150,6 +155,89 @@ copsearch --id 884bb
 # List everything
 copsearch --list
 ```
+
+## Forking a session
+
+Sometimes you want to try a different direction from where a session left off
+without losing the original. `copsearch fork` clones a session into a brand-new
+UUID — same conversation, same plan, same artifacts — that `copilot --resume`
+will pick up cleanly. The source is never modified.
+
+### From the TUI (preferred)
+
+| Key | Action |
+|-----|--------|
+| `f` | **Quick fork** — instant, marked 🗑️ throw-away. Cursor jumps to the new fork. |
+| `F` | **Named fork** — prompts for a name; persistent (not throw-away). |
+| `!` | Toggle the 🗑️ throw-away marker on any session (rescue an experiment, or mark one for cleanup). |
+| `t` | Filter the list to **only** throw-away forks (cleanup sweep). |
+
+Throw-away forks show with a 🗑️ prefix and dimmed row in the listing.
+copsearch never auto-deletes them — when you have ≥3 throw-aways, the TUI
+prints a one-line nudge on launch:
+
+```
+🗑️  5 throw-away forks (oldest 4d) — copsearch -T to review
+```
+
+### From the CLI
+
+```bash
+# Quick fork (throw-away — defaults to scratch experiment)
+copsearch fork 3910a1c3
+#   🗑️  Forked 3910a1c3-bd6 → fb40bb3f-ccd6-4552-…
+#     Resume: copilot --resume=fb40bb3f-…
+
+# Named persistent fork
+copsearch fork 3910a1c3 --name "Try alternative auth"
+
+# Persistent without a name
+copsearch fork 3910a1c3 --keep
+
+# Fork and immediately launch copilot in the new session
+copsearch fork 3910a1c3 --resume
+
+# Machine-readable (for scripts)
+copsearch fork 3910a1c3 --json
+
+# List only throw-away forks (for cleanup)
+copsearch --throwaway      # or -T
+```
+
+### What gets forked
+
+- ✅ `events.jsonl` — the conversation, snapshot-copied (race-safe even when source is active).
+- ✅ `plan.md`, `checkpoints/`, `files/`, `research/` — session artifacts.
+- ✅ `session.db`, `.sqlite` — Copilot's local cache (regenerable but copied for speed).
+- ❌ `inuse.<pid>.lock` — the new fork is offline until you resume it.
+- ❌ `rewind-snapshots/` — Copilot's internal undo; rebuilt on first turn.
+
+The fork-marker fields (`forked_from`, `forked_at`, `forked_at_event`,
+`throwaway`) live in a sidecar file `.copsearch.json` inside the session
+directory. Copilot CLI rewrites `workspace.yaml` with its own schema on every
+save and would silently drop unknown keys — the sidecar is invisible to
+Copilot and persists. (We also stamp the same fields into `workspace.yaml`
+so a fresh fork is detectable for the brief window before Copilot first
+saves.)
+
+Each event's `data.sessionId` is rewritten in the new `events.jsonl` to
+point at the fork's id. Copilot reads that field when allocating its
+`inuse.<pid>.lock`; without the rewrite the lock would land in the source's
+directory and copsearch would light up the wrong session as active.
+
+### Repairing legacy forks
+
+Forks created before the sidecar feature shipped lose their `forked_from`
+marker as soon as Copilot rewrites `workspace.yaml`. Run:
+
+```bash
+copsearch repair-forks --dry-run   # preview
+copsearch repair-forks             # backfill .copsearch.json sidecars
+```
+
+This scans every session and checks whether its first event's `sessionId`
+matches the directory name. A mismatch is the unmistakable fingerprint of a
+fork — the source id is recovered and written to the sidecar.
 
 ## Viewing a session
 
